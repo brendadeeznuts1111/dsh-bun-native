@@ -21,8 +21,8 @@
  * @module @local/bun-native
  */
 
-import { readFileSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path'
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** Stable Loader identity. */
@@ -1402,6 +1402,436 @@ async function buildDashboardSnapshot(ctx, config, request) {
   })
 }
 
+/** Read-only Git commands in the repository audit stay inside one short bound. */
+const GIT_TIMEOUT_MS = 5_000
+
+/** Dependency fields a DSH plugin bundle must leave empty. */
+const BUNDLE_DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
+
+/** Actions of the `bun_repos` tool. */
+const REPO_ACTIONS = ['list', 'audit', 'add']
+
+/**
+ * Render one check roster as counts.
+ * @param {Array<{status: string}>} checks - collected checks.
+ * @returns {{pass: number, warn: number, fail: number}}
+ */
+function summarizeChecks(checks) {
+  const summary = { pass: 0, warn: 0, fail: 0 }
+  for (const check of checks) summary[check.status] += 1
+  return summary
+}
+
+/**
+ * Run one short read-only program and collect bounded output. Unlike
+ * `runBun`, this helper does not resolve a sandbox policy: the repository audit
+ * only observes Git metadata, and a write-capable Git command stays a normal
+ * `bun_exec` tool call.
+ * @param {any} subprocess - the subprocess service.
+ * @param {string[]} argv - program and arguments.
+ * @param {string} cwd - working directory.
+ * @param {number} timeoutMs - bound for one invocation.
+ * @param {AbortSignal} signal - cancellation.
+ * @returns {Promise<Record<string, any>>}
+ */
+async function captureProcess(subprocess, argv, cwd, timeoutMs, signal) {
+  const spawnedAt = Date.now()
+  const handle = subprocess.spawn({
+    argv,
+    cwd,
+    stdio: {
+      stdin: 'ignore',
+      stdout: { maxBytes: 65_536 },
+      stderr: { maxBytes: 65_536 },
+    },
+    graceMs: 1_000,
+    signal,
+  })
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    try {
+      handle.terminate()
+    } catch {
+      // The process may already have settled.
+    }
+  }, timeoutMs)
+  timer.unref?.()
+  let outcome
+  try {
+    outcome = await handle.done
+  } finally {
+    clearTimeout(timer)
+  }
+  const readStream = (collected) => {
+    if (collected === undefined) return ''
+    const read = collected.readFrom(0)
+    return read !== undefined && typeof read.text === 'string' ? read.text : ''
+  }
+  return {
+    exitCode: outcome.exitCode,
+    signal: outcome.signal ?? null,
+    timedOut,
+    durationMs: Date.now() - spawnedAt,
+    stdout: readStream(handle.collected.stdout),
+    stderr: readStream(handle.collected.stderr),
+  }
+}
+
+/**
+ * Split the `git status --porcelain=v1 --branch` header into its parts.
+ * @param {string} text - header after the leading `## `.
+ * @returns {{branch: string, ahead: number, behind: number}}
+ */
+function parseGitBranchHeader(text) {
+  const tracking = /\[([^\]]+)\]/u.exec(text)
+  const ahead = tracking === null ? null : /ahead (\d+)/u.exec(tracking[1])
+  const behind = tracking === null ? null : /behind (\d+)/u.exec(tracking[1])
+  let branch = text.replace(/\s*\[[^\]]*\]\s*$/u, '').trim()
+  const upstream = /^(.+?)\.\.\./u.exec(branch)
+  if (upstream !== null) branch = upstream[1]
+  if (branch.startsWith('No commits yet on ')) branch = branch.slice('No commits yet on '.length)
+  return {
+    branch,
+    ahead: ahead === null ? 0 : Number(ahead[1]),
+    behind: behind === null ? 0 : Number(behind[1]),
+  }
+}
+
+/**
+ * Resolve a repository's Git branch, tracking distance, working-tree delta and
+ * last commit. A failure is reported as `{ error }` so one non-Git workspace
+ * cannot fail the whole audit.
+ * @param {any} ctx - the plugin context.
+ * @param {string} directory - repository directory.
+ * @param {AbortSignal} signal - cancellation.
+ * @returns {Promise<Record<string, any>>}
+ */
+async function readGitState(ctx, directory, signal) {
+  const subprocess = ctx.get('subprocess')
+  if (subprocess === undefined) return { error: 'the subprocess service is unavailable' }
+  let git
+  try {
+    git = await subprocess.resolveExecutable('git', undefined, signal)
+  } catch (error) {
+    return { error: `git is not available (${errorMessage(error)})` }
+  }
+  if (signal.aborted === true) return { error: 'the audit was cancelled' }
+  let status
+  try {
+    status = await captureProcess(subprocess, [git, '-C', directory, 'status', '--porcelain=v1', '--branch'], directory, GIT_TIMEOUT_MS, signal)
+  } catch (error) {
+    return { error: `git status failed: ${errorMessage(error)}` }
+  }
+  if (status.timedOut) return { error: `git status timed out after ${GIT_TIMEOUT_MS} ms` }
+  if (status.exitCode !== 0) {
+    const detail = status.stderr.trim().split(/\r?\n/u)[0]
+    return { error: detail.length > 0 ? detail : `git status exited ${status.exitCode}` }
+  }
+  const lines = status.stdout.split(/\r?\n/u)
+  const header = lines[0] ?? ''
+  if (!header.startsWith('## ')) return { error: 'git status returned no branch header' }
+  const branch = parseGitBranchHeader(header.slice(3))
+  const changed = lines.slice(1).filter((line) => line.trim().length > 0).length
+  let lastCommit = null
+  try {
+    const log = await captureProcess(subprocess, [git, '-C', directory, 'log', '-1', '--format=%h%x1f%s%x1f%cI'], directory, GIT_TIMEOUT_MS, signal)
+    if (log.exitCode === 0 && log.stdout.trim().length > 0) {
+      const [hash, subject, date] = log.stdout.trim().split('\x1f')
+      if (hash !== undefined) lastCommit = { hash, subject: subject ?? '', date: date ?? '' }
+    }
+  } catch {
+    // The commit summary is optional; branch and worktree state still report.
+  }
+  return { ...branch, changed, lastCommit }
+}
+
+/**
+ * Resolve the active profile directory the way the repo scripts do.
+ * @returns {string | undefined}
+ */
+function profileDirectory() {
+  if (typeof process.env.DSH_PROFILE_DIR === 'string' && process.env.DSH_PROFILE_DIR.length > 0) return process.env.DSH_PROFILE_DIR
+  if (typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME.length > 0) return join(process.env.DSH_HOME, 'profiles', 'desktop')
+  return undefined
+}
+
+/**
+ * Describe how one bundle is installed into the active DSH profile.
+ * @param {string} packageName - manifest package name.
+ * @param {string} bundleDir - bundle directory.
+ * @returns {{checked: boolean, linked: boolean, linkPath?: string, target?: string}}
+ */
+function readProfileLink(packageName, bundleDir) {
+  const profile = profileDirectory()
+  if (profile === undefined || typeof packageName !== 'string' || packageName.length === 0) return { checked: false, linked: false }
+  const linkPath = join(profile, 'node_modules', ...packageName.split('/'))
+  try {
+    const stat = lstatSync(linkPath)
+    if (!stat.isSymbolicLink()) return { checked: true, linked: false, linkPath }
+    const target = realpathSync(linkPath)
+    return { checked: true, linked: target === realpathSync(bundleDir), linkPath, target }
+  } catch {
+    return { checked: true, linked: false, linkPath }
+  }
+}
+
+/**
+ * Audit a DSH plugin bundle's declared files, dependency policy and profile
+ * link. Read-only.
+ * @param {any} ctx - the plugin context.
+ * @param {string} directory - bundle directory.
+ * @param {Record<string, any>} rawPackage - parsed package.json.
+ * @param {AbortSignal} signal - cancellation.
+ * @returns {Promise<Record<string, any>>}
+ */
+async function auditBundle(ctx, directory, rawPackage, signal) {
+  const fs = ctx.get('fs')
+  const dsh = rawPackage.dsh !== null && typeof rawPackage.dsh === 'object' ? rawPackage.dsh : {}
+  const bundleConfig = dsh.bundle !== null && typeof dsh.bundle === 'object' ? dsh.bundle : {}
+  const patch = typeof bundleConfig.patch === 'string' ? bundleConfig.patch : null
+  const declared = []
+  if (patch !== null) declared.push(patch)
+  const exportsValue = rawPackage.exports !== null && typeof rawPackage.exports === 'object' ? rawPackage.exports : {}
+  for (const value of Object.values(exportsValue)) {
+    if (typeof value === 'string' && value.startsWith('./') && !value.includes('*')) declared.push(value)
+  }
+  if (Array.isArray(rawPackage.files)) {
+    for (const value of rawPackage.files) {
+      if (typeof value === 'string' && !value.includes('*')) declared.push(value)
+    }
+  }
+  const files = [...new Set(declared)]
+  const missing = []
+  if (fs !== undefined) {
+    for (const file of files) {
+      try {
+        const info = await fs.stat(await fs.resolve(file, { cwd: directory, signal }), signal)
+        if (info === undefined) missing.push(file)
+      } catch {
+        missing.push(file)
+      }
+    }
+  }
+  const dependencyFields = BUNDLE_DEPENDENCY_FIELDS.filter((field) => {
+    const value = rawPackage[field]
+    return value !== null && typeof value === 'object' && Object.keys(value).length > 0
+  })
+  return {
+    name: typeof rawPackage.name === 'string' ? rawPackage.name : '(unnamed)',
+    version: typeof rawPackage.version === 'string' ? rawPackage.version : null,
+    patch,
+    files: files.length,
+    missing,
+    dependencyFields,
+    installed: readProfileLink(typeof rawPackage.name === 'string' ? rawPackage.name : '', directory),
+  }
+}
+
+/**
+ * Audit one repository: Bun project classification, lockfile, Git state and,
+ * when the directory is a DSH bundle, its manifest and profile link.
+ * @param {any} ctx - the plugin context.
+ * @param {any} exec - execution context carrying the abort signal.
+ * @param {Record<string, any>} config - resolved plugin config.
+ * @param {{path: string, title?: string, workspaceId?: string, sessionCount?: number}} repo - repository record.
+ * @param {(cwd: string) => Promise<Record<string, any>>} readRuntime - runtime probe.
+ * @returns {Promise<Record<string, any>>}
+ */
+async function auditRepo(ctx, exec, config, repo, readRuntime) {
+  const startedAt = Date.now()
+  const path = repo.path
+  const checks = []
+  const add = (id, title, status, detail) => checks.push({ id, title, status, detail: String(detail).slice(0, 500) })
+  const result = {
+    path,
+    title: typeof repo.title === 'string' && repo.title.trim().length > 0 ? repo.title : basename(path),
+    workspaceId: repo.workspaceId === undefined ? null : String(repo.workspaceId),
+    sessionCount: typeof repo.sessionCount === 'number' ? repo.sessionCount : 0,
+    exists: false,
+    audit: null,
+  }
+
+  let project
+  try {
+    project = await inspectProject(ctx, exec, path, config, readRuntime)
+  } catch (error) {
+    add('repo.directory', 'Directory', 'fail', errorMessage(error))
+    result.audit = {
+      generatedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAt,
+      status: 'fail',
+      summary: { pass: 0, warn: 0, fail: 1 },
+      checks,
+      bun: null,
+      git: null,
+      bundle: null,
+    }
+    return lossless(result)
+  }
+  result.exists = true
+  add('repo.directory', 'Directory', 'pass', path)
+  add('bun.classification', 'Bun classification', project.kind === 'bun-native' ? 'pass' : 'warn', `${project.kind} (${project.confidence})`)
+  if (project.kind === 'bun-native') {
+    const rootLockfile = project.workspace !== null && project.workspace.rootLockfile !== undefined ? project.workspace.rootLockfile : null
+    add(
+      'bun.lockfile',
+      'Lockfile',
+      project.lockfile !== null || rootLockfile !== null ? 'pass' : 'warn',
+      project.lockfile !== null
+        ? `${project.lockfile.file} (${project.lockfile.kind})`
+        : rootLockfile !== null
+          ? `workspace root ${rootLockfile.file}`
+          : 'no lockfile',
+    )
+    if (project.workspace !== null) {
+      add('bun.workspace', 'Workspace', 'pass', project.workspace.role === 'root' ? `root of ${project.workspace.patterns.join(', ')}` : `member ${project.workspace.memberName ?? project.workspace.memberPath} of ${project.workspace.root}`)
+    }
+  }
+
+  const git = await readGitState(ctx, path, exec.signal)
+  if (typeof git.error === 'string') {
+    add('git.repository', 'Git repository', 'warn', git.error)
+  } else {
+    add('git.repository', 'Git repository', 'pass', `${git.branch}${git.ahead > 0 ? `, ahead ${git.ahead}` : ''}${git.behind > 0 ? `, behind ${git.behind}` : ''}`)
+    add('git.worktree', 'Working tree', git.changed === 0 ? 'pass' : 'warn', git.changed === 0 ? 'clean' : `${git.changed} changed file${git.changed === 1 ? '' : 's'}`)
+  }
+
+  let bundle = null
+  const rawPackage = await readPackageJsonAt(ctx.get('fs'), path, exec.signal)
+  if (rawPackage !== undefined && rawPackage.raw !== undefined && rawPackage.raw !== null && typeof rawPackage.raw === 'object' && rawPackage.raw.dsh !== undefined && rawPackage.raw.dsh !== null && typeof rawPackage.raw.dsh === 'object') {
+    bundle = await auditBundle(ctx, path, rawPackage.raw, exec.signal)
+    add('plugin.manifest', 'Plugin manifest', bundle.missing.length === 0 ? 'pass' : 'fail', bundle.missing.length === 0 ? `${bundle.files} declared file(s) present` : `missing: ${bundle.missing.join(', ')}`)
+    add('plugin.dependencies', 'Plugin dependencies', bundle.dependencyFields.length === 0 ? 'pass' : 'fail', bundle.dependencyFields.length === 0 ? 'dependency-free' : `${bundle.dependencyFields.join(', ')} declared`)
+    add(
+      'plugin.install',
+      'Profile install',
+      bundle.installed.linked ? 'pass' : 'warn',
+      bundle.installed.checked
+        ? bundle.installed.linked
+          ? 'linked into the DSH profile'
+          : `not linked${bundle.installed.linkPath === undefined ? '' : ` at ${bundle.installed.linkPath}`}`
+        : 'DSH_PROFILE_DIR is unavailable',
+    )
+  }
+
+  const summary = summarizeChecks(checks)
+  result.audit = {
+    generatedAt: new Date().toISOString(),
+    durationMs: Date.now() - startedAt,
+    status: summary.fail > 0 ? 'fail' : summary.warn > 0 ? 'warn' : 'pass',
+    summary,
+    checks,
+    bun: {
+      kind: project.kind,
+      confidence: project.confidence,
+      lockfile: project.lockfile,
+      rootLockfile: project.workspace !== null && project.workspace.rootLockfile !== undefined ? project.workspace.rootLockfile : null,
+      linker: project.linker.strategy,
+      workspace: project.workspace,
+      runtime: project.runtime.version === undefined ? null : project.runtime.version,
+      packageJson: project.packageJson === null
+        ? null
+        : {
+            name: project.packageJson.name === undefined ? null : project.packageJson.name,
+            version: project.packageJson.version === undefined ? null : project.packageJson.version,
+            scripts: project.packageJson.scripts.map((script) => script.name),
+          },
+      notes: project.notes,
+    },
+    git,
+    bundle,
+  }
+  return lossless(result)
+}
+
+/**
+ * Audit every repository registered as a DSH workspace.
+ * @param {any} ctx - the plugin context.
+ * @param {Record<string, any>} config - resolved plugin config.
+ * @param {{signal: AbortSignal}} request - the fetch request or tool context.
+ * @returns {Promise<Record<string, any>>}
+ */
+async function buildReposSnapshot(ctx, config, request) {
+  const startedAt = Date.now()
+  const generatedAt = new Date().toISOString()
+  const registry = ctx.get('workspaceRegistry')
+  if (registry === undefined || typeof registry.list !== 'function') {
+    return lossless({
+      generatedAt,
+      durationMs: Date.now() - startedAt,
+      warning: 'The workspace registry is unavailable in this profile.',
+      summary: { repos: 0, pass: 0, warn: 0, fail: 0 },
+      repos: [],
+    })
+  }
+  const exec = { signal: request.signal, agent: undefined, callId: 'bun-native-repos', name: 'bun_repos', arguments: {} }
+  const readRuntime = (cwd) => readRuntimeVersion(ctx, exec, config, cwd)
+  const rows = registry.list().map((workspace) => ({
+    path: workspace.path,
+    title: workspace.title,
+    workspaceId: String(workspace.id),
+    sessionCount: Array.isArray(workspace.sessionIds) ? workspace.sessionIds.length : 0,
+  }))
+  const repos = []
+  for (const row of rows) repos.push(await auditRepo(ctx, exec, config, row, readRuntime))
+  const rank = { fail: 0, warn: 1, pass: 2 }
+  repos.sort((left, right) => rank[left.audit.status] - rank[right.audit.status] || left.title.localeCompare(right.title))
+  const summary = { repos: repos.length, pass: 0, warn: 0, fail: 0 }
+  for (const repo of repos) summary[repo.audit.status] += 1
+  return lossless({ generatedAt, durationMs: Date.now() - startedAt, summary, repos })
+}
+
+/** Model-facing labels for audit statuses. */
+const AUDIT_LABELS = { pass: 'PASS', warn: 'WARN', fail: 'FAIL' }
+
+/**
+ * Render one audited repository as model-facing lines.
+ * @param {Record<string, any>} repo - audited repository.
+ * @returns {string[]}
+ */
+function renderRepoLines(repo) {
+  const audit = repo.audit
+  if (audit === null) return [`FAIL  ${repo.title} — ${repo.path}`, '  No audit data.']
+  const lines = [`${AUDIT_LABELS[audit.status] ?? audit.status}  ${repo.title} — ${repo.path}`]
+  if (audit.bun !== null) {
+    lines.push(`  Bun: ${audit.bun.kind} (${audit.bun.confidence})${audit.bun.lockfile === null ? '' : `, ${audit.bun.lockfile.file}`}, ${audit.bun.linker} linker`)
+  }
+  if (audit.git !== null) {
+    lines.push(typeof audit.git.error === 'string'
+      ? `  Git: ${audit.git.error}`
+      : `  Git: ${audit.git.branch}, ${audit.git.changed === 0 ? 'clean' : `${audit.git.changed} changed`}${audit.git.lastCommit === null ? '' : `; last commit ${audit.git.lastCommit.hash} ${audit.git.lastCommit.subject}`}`)
+  }
+  if (audit.bundle !== null) {
+    lines.push(`  Plugin: ${audit.bundle.name}@${audit.bundle.version === null ? '?' : audit.bundle.version}, ${audit.bundle.installed.linked ? 'linked into the profile' : 'not linked into the profile'}`)
+  }
+  for (const check of audit.checks) lines.push(`  ${AUDIT_LABELS[check.status] ?? check.status}  ${check.title} — ${check.detail}`)
+  return lines
+}
+
+/**
+ * Render the `bun_repos` result text.
+ * @param {Record<string, any>} value - the tool's result value.
+ * @returns {string}
+ */
+function renderRepos(value) {
+  if (value.repos.length > 0) {
+    const lines = [`Repositories: ${value.summary.repos} (${value.summary.pass} pass, ${value.summary.warn} warn, ${value.summary.fail} fail)`]
+    for (const repo of value.repos) {
+      lines.push('', ...renderRepoLines(repo))
+    }
+    return lines.join('\n')
+  }
+  const repo = value.repository
+  if (repo === null) return 'No repository was audited.'
+  const lines = []
+  if (value.workspace !== null) {
+    lines.push(`Workspace: ${value.workspace.title}${value.workspace.workspaceId === null ? '' : ` (${value.workspace.workspaceId})`} — ${value.workspace.path}`)
+  }
+  lines.push(...renderRepoLines(repo))
+  return lines.join('\n')
+}
+
 /**
  * Render a doctor report as model-facing text.
  * @param {Record<string, any>} value - the tool's result value.
@@ -2004,12 +2434,166 @@ export function apply(ctx, rawConfig) {
     isConcurrencySafe: () => false,
   }
 
+  const reposTool = {
+    name: 'bun_repos',
+    description: 'Audit and extend the repositories registered as DSH workspaces: `list` returns Bun, Git and plugin health for every workspace; `audit` diagnoses one directory (Bun classification, lockfile, workspace role, Git branch and working-tree state, plugin manifest and profile link); `add` registers a directory as a DSH workspace and audits it. Only `add` changes state, and it changes workspace membership only.',
+    parameters: {
+      action: {
+        type: 'string',
+        enum: REPO_ACTIONS,
+        required: true,
+        description: 'What to do: "list" every registered repository, "audit" one directory, or "add" a directory as a DSH workspace.',
+      },
+      path: {
+        type: 'string',
+        description: 'Directory for "audit" and "add". Defaults to the session working directory for "audit"; a relative path is resolved against the session working directory.',
+      },
+      title: {
+        type: 'string',
+        description: 'Display title for "add" (Title Case in this workspace). Defaults to the title DSH assigns, usually the directory name.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['action', 'generatedAt', 'durationMs', 'summary', 'repos', 'repository', 'workspace'],
+        properties: {
+          action: { type: 'string' },
+          generatedAt: { type: 'string' },
+          durationMs: { type: 'number' },
+          summary: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['repos', 'pass', 'warn', 'fail'],
+            properties: {
+              repos: { type: 'integer' },
+              pass: { type: 'integer' },
+              warn: { type: 'integer' },
+              fail: { type: 'integer' },
+            },
+          },
+          repos: { type: 'array', items: { type: 'object' } },
+          repository: { oneOf: [{ type: 'null' }, { type: 'object' }] },
+          workspace: {
+            oneOf: [
+              { type: 'null' },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['workspaceId', 'path', 'title'],
+                properties: {
+                  workspaceId: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+                  path: { type: 'string' },
+                  title: { type: 'string' },
+                },
+              },
+            ],
+          },
+        },
+      },
+      render: (_args, value) => textBlocks(renderRepos(value)),
+    },
+    async execute(args, exec) {
+      const action = args.action
+      if (!REPO_ACTIONS.includes(action)) throw new Error(`bun_repos action must be one of: ${REPO_ACTIONS.join(', ')}`)
+      const startedAt = Date.now()
+      if (action === 'list') {
+        const snapshot = await buildReposSnapshot(ctx, config, { signal: exec.signal })
+        return lossless({
+          action,
+          generatedAt: snapshot.generatedAt,
+          durationMs: Date.now() - startedAt,
+          summary: snapshot.summary,
+          repos: snapshot.repos,
+          repository: null,
+          workspace: null,
+        })
+      }
+
+      const base = await sessionCwd(ctx, exec)
+      const requested = typeof args.path === 'string' && args.path.trim().length > 0 ? args.path.trim() : undefined
+      if (requested === undefined) throw new Error(`bun_repos action "${action}" requires a \`path\``)
+      const directory = resolveDirectory(base, requested)
+      const readRuntime = (cwd) => readRuntimeVersion(ctx, exec, config, cwd)
+
+      if (action === 'audit') {
+        const repository = await auditRepo(ctx, exec, config, { path: directory }, readRuntime)
+        return lossless({
+          action,
+          generatedAt: new Date().toISOString(),
+          durationMs: Date.now() - startedAt,
+          summary: { repos: 1, pass: repository.audit.summary.pass, warn: repository.audit.summary.warn, fail: repository.audit.summary.fail },
+          repos: [],
+          repository,
+          workspace: null,
+        })
+      }
+
+      const fs = ctx.get('fs')
+      if (fs === undefined) throw new Error('bun_repos action "add" requires the Host filesystem service, which this profile does not provide')
+      const info = await fs.stat(await fs.resolve(directory, { cwd: base, signal: exec.signal }), exec.signal)
+      if (info === undefined || info.type !== 'directory') throw new Error(`Not a directory: ${directory}`)
+      const controller = ctx.get('workspaceController')
+      if (controller === undefined || typeof controller.create !== 'function') {
+        throw new Error('bun_repos action "add" requires the Host workspace controller, which this profile does not provide')
+      }
+      const created = await controller.create({ path: directory })
+      let workspaceId = created !== undefined && created !== null && created.workspace !== undefined && created.workspace !== null && created.workspace.workspaceId !== undefined
+        ? String(created.workspace.workspaceId)
+        : undefined
+      const requestedTitle = typeof args.title === 'string' && args.title.trim().length > 0 ? args.title.trim() : undefined
+      if (requestedTitle !== undefined && workspaceId !== undefined) await controller.rename({ workspaceId, title: requestedTitle })
+      let record
+      const registry = ctx.get('workspaceRegistry')
+      if (registry !== undefined && typeof registry.resolveByPath === 'function') {
+        try {
+          record = await registry.resolveByPath(directory)
+        } catch {
+          record = undefined
+        }
+      }
+      if (record !== undefined && record !== null) workspaceId = String(record.id)
+      const repository = await auditRepo(ctx, exec, config, {
+        path: directory,
+        title: record !== undefined && record !== null ? record.title : requestedTitle,
+        workspaceId,
+        sessionCount: record !== undefined && record !== null && Array.isArray(record.sessionIds) ? record.sessionIds.length : 0,
+      }, readRuntime)
+      return lossless({
+        action,
+        generatedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAt,
+        summary: { repos: 1, pass: repository.audit.summary.pass, warn: repository.audit.summary.warn, fail: repository.audit.summary.fail },
+        repos: [],
+        repository,
+        workspace: {
+          workspaceId: workspaceId === undefined ? null : workspaceId,
+          path: directory,
+          title: record !== undefined && record !== null ? record.title : requestedTitle === undefined ? basename(directory) : requestedTitle,
+        },
+      })
+    },
+    presentCall: (args) => ({
+      card: 'generic',
+      title: typeof args === 'object' && args !== null && typeof args.action === 'string' ? `Bun repositories ${args.action}` : 'Bun repositories',
+      kind: 'execute',
+    }),
+    presentResult: (_args, result) => {
+      const block = result.content.length === 1 ? result.content[0] : undefined
+      if (block === undefined || block.type !== 'text') return undefined
+      return { card: 'generic', content: textBlocks(`\`\`\`text\n${block.text.replace(/\n+$/, '')}\n\`\`\``) }
+    },
+    isConcurrencySafe: () => false,
+  }
+
   ctx.effect(() => {
     const disposers = [
       ctx.tools.register(projectTool),
       ctx.tools.register(apiTool),
       ctx.tools.register(execTool),
       ctx.tools.register(doctorTool),
+      ctx.tools.register(reposTool),
     ]
     return () => {
       for (const dispose of disposers) dispose()
@@ -2033,6 +2617,23 @@ export function apply(ctx, rawConfig) {
         }
       },
     }))
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/api/bun-native/repos',
+      resource: async (request, peer) => {
+        if (peer !== undefined && (peer.principal === undefined || peer.principal.kind !== 'owner')) {
+          return Response.json({ error: 'forbidden' }, { status: 403 })
+        }
+        if (request.method !== 'GET' && request.method !== 'HEAD') {
+          return Response.json({ error: 'method not allowed' }, { status: 405 })
+        }
+        try {
+          return Response.json(await buildReposSnapshot(ctx, config, request), { headers: { 'cache-control': 'no-store' } })
+        } catch (error) {
+          return Response.json({ error: errorMessage(error) }, { status: 500 })
+        }
+      },
+    }))
   }
 
   if (config.promptGuidance) {
@@ -2045,6 +2646,7 @@ export function apply(ctx, rawConfig) {
           '## Bun-native workflow',
           'Call `bun_project` before assuming a toolchain: Bun-native projects commit `bun.lock` (or `bunfig.toml`), and their scripts run through Bun.',
           'In a Bun-native project use `bun_exec` for scripts, tests and installs, and call `bun_api` before using a Bun-specific global (`Bun.serve`, `Bun.file`, `Bun.$`, `bun:sqlite`, `bun:test`).',
+          'Use `bun_repos` to audit the repositories registered as DSH workspaces, or to register a new one before working in it.',
           'If the Bun docs MCP tools are available (`mcp__bun_docs__search_bun`, `read_bun_page`, `grep_bun`, `list_bun_pages`), use them for guides, blog posts and full pages beyond `bun_api`\'s offline digest; read the `bun://skill` resource when starting a Bun task.',
           'Prefer those built-in Bun APIs over new dependencies; do not introduce npm, yarn or pnpm there.',
         ].join('\n'),
@@ -2054,16 +2656,22 @@ export function apply(ctx, rawConfig) {
 }
 
 export {
+  auditBundle,
+  auditRepo,
   buildDashboardSnapshot,
   buildDoctorReport,
+  buildReposSnapshot,
   bunfigSections,
   describeLockfile,
   findWorkspaceRoot,
   inspectProject,
   loadCatalog,
   matchesWorkspacePatterns,
+  parseGitBranchHeader,
   rankApis,
   readBunfigLinker,
+  readGitState,
+  readProfileLink,
   readWorkspaceDependencies,
   readWorkspaces,
   resolveConfig,

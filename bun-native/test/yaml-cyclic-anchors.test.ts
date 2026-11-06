@@ -1,7 +1,8 @@
 /**
  * `Bun.YAML` cyclic anchors and aliases.
  *
- * Bun's 1.4 announcement card (blog image `yaml-cyclic-anchors.jpg`):
+ * Bun's 1.4 announcement card:
+ * https://bun.com/images/blog/bun-1.4/tweets/yaml-cyclic-anchors.jpg
  *
  *   "In the next version of Bun — Bun.YAML.parse supports cyclic anchors &
  *    aliases"
@@ -18,7 +19,9 @@
  */
 
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 /** The exact example from the announcement image. */
 const TWEET_YAML = `tweet: &tweet
@@ -117,6 +120,57 @@ describe('Bun.YAML stringify plain values', () => {
   test('plain values serialize and parse back', () => {
     const text = Bun.YAML.stringify({ a: 1, list: [1, 2] })
     expect(Bun.YAML.parse(text)).toEqual({ a: 1, list: [1, 2] })
+  })
+})
+
+describe('Bun.YAML parse inputs', () => {
+  test('parses UTF-8 bytes and a DataView', () => {
+    const bytes = new TextEncoder().encode('abc: def')
+    expect(Bun.YAML.parse(bytes)).toEqual({ abc: 'def' })
+    expect(Bun.YAML.parse(new DataView(bytes.buffer))).toEqual({ abc: 'def' })
+  })
+
+  test('parses an in-memory Blob but rejects a file-backed Blob', async () => {
+    expect(Bun.YAML.parse(new Blob(['abc: def']))).toEqual({ abc: 'def' })
+
+    const dir = mkdtempSync(join(tmpdir(), 'bun-yaml-'))
+    const file = join(dir, 'sample.yaml')
+    writeFileSync(file, 'abc: def\n')
+    try {
+      expect(() => Bun.YAML.parse(Bun.file(file))).toThrow(/File blob cannot be used here/)
+      expect(Bun.YAML.parse(await Bun.file(file).text())).toEqual({ abc: 'def' })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('returns an array for a multi-document stream', () => {
+    expect(Bun.YAML.parse('---\na: 1\n---\nb: 2\n')).toEqual([{ a: 1 }, { b: 2 }])
+  })
+})
+
+describe('Bun.YAML stringify options', () => {
+  test('omitting space emits flow style; space emits block style', () => {
+    const input = { abc: 'def', num: 123 }
+    expect(Bun.YAML.stringify(input)).toBe('{abc: def,num: 123}')
+    expect(Bun.YAML.stringify(input, null, 2)).toBe('abc: def\nnum: 123')
+  })
+
+  test('clamps numeric space to 10 and uses the first 10 characters of a string', () => {
+    expect(Bun.YAML.stringify({ a: { b: 1 } }, null, 20)).toBe(`a:\n${' '.repeat(10)}b: 1`)
+    expect(Bun.YAML.stringify({ a: { b: 1 } }, null, '--')).toBe('a:\n--b: 1')
+  })
+
+  test('rejects a replacer argument', () => {
+    const stringify = Bun.YAML.stringify as unknown as (value: unknown, replacer: unknown) => string
+    expect(() => stringify({ a: 1 }, () => 1)).toThrow(/does not support the replacer/)
+  })
+
+  test('double-quotes scalars that would parse as numbers or keywords', () => {
+    expect(Bun.YAML.stringify('abc')).toBe('abc')
+    expect(Bun.YAML.stringify('123')).toBe('"123"')
+    expect(Bun.YAML.stringify('true')).toBe('"true"')
+    expect(Bun.YAML.stringify('yes')).toBe('"yes"')
   })
 })
 

@@ -54,14 +54,25 @@ not installed or unreachable.
 
 ## Install from the market index
 
-The index lives at:
+Use a **direct** raw URL — DSH rejects an index served behind a redirect. Two
+forms are published:
 
-```
-https://raw.githubusercontent.com/brendadeeznuts1111/dsh-bun-native/main/market/index.json
-```
+| Purpose | URL |
+|---|---|
+| latest (DSH index source) | `https://raw.githubusercontent.com/brendadeeznuts1111/dsh-bun-native/main/market/index.json` |
+| exact release (pinned, immediate) | `https://raw.githubusercontent.com/brendadeeznuts1111/dsh-bun-native/v1.2.9/market/index.json` |
+
+GitHub's raw CDN caches the mutable `main` path for **~5 minutes**, so a
+brand-new publish can be hidden behind the previous document for that window.
+The pinned `v<version>` tag path is immutable and serves the release
+immediately. The GitHub release assets (`…/releases/download/v<version>/index.json`
+and the moving `…/releases/latest/download/index.json`) redirect to an
+attachment and therefore cannot be used as a DSH index source; they remain a
+download mirror for scripts. The jsDelivr `@main` mirror caches branch refs for
+12 hours, so pin it to a commit if a second CDN is needed.
 
 1. Plugins → **Experimental plugins** → enable **Custom plugin indexes**.
-2. **Discover** → **Add index source** → paste the URL.
+2. **Discover** → **Add index source** → paste the latest or pinned URL.
 3. Install the **Bun native** and/or **Bun docs MCP** card; the confirmation
    shows the pinned Git source.
 

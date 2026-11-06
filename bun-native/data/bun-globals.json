@@ -621,11 +621,11 @@
       "name": "Bun.YAML",
       "category": "parsing",
       "kind": "namespace",
-      "summary": "Parses YAML documents, including multi-document streams, anchors, aliases and cyclic anchors, and serializes JavaScript values back to YAML; cyclic values stringify as anchors and aliases.",
-      "signature": "Bun.YAML: { parse(input: string | NodeJS.TypedArray | Blob): unknown; stringify(value: unknown, replacer?: null, space?: string | number): string }",
+      "summary": "Parses YAML documents, including multi-document streams, anchors, aliases and cyclic anchors, and serializes JavaScript values back to YAML. parse accepts strings, UTF-8 bytes (ArrayBufferLike/TypedArray/DataView) and in-memory Blobs; a file-backed Blob such as Bun.file() throws, so pass await file.text(). stringify infers anchors and aliases for cycles; without space it emits flow style, with a number or string space it emits block style (number clamped 0-10, string uses its first 10 characters); replacer is not supported.",
+      "signature": "Bun.YAML: { parse(input: string | ArrayBufferLike | TypedArray<ArrayBufferLike> | DataView<ArrayBufferLike> | Blob): unknown; stringify(input: unknown, replacer?: null, space?: string | number): string }",
       "docsUrl": "https://bun.com/docs/runtime/yaml",
       "runtime": "any",
-      "example": "const data = Bun.YAML.parse(\"name: bun\\nversion: 1.4.4\");\nconsole.log(data.name);\nconsole.log(Bun.YAML.stringify(data));"
+      "example": "const data = Bun.YAML.parse(\"name: bun\\nversion: 1.4.4\");\nconsole.log(Bun.YAML.stringify(data, null, 2));\nconst cycle = {}; cycle.self = cycle;\nconsole.log(Bun.YAML.stringify(cycle, null, 2));"
     },
     {
       "name": "Bun.JSON5",
