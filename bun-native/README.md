@@ -99,7 +99,7 @@ project under the session's workspace.
 ## Tests
 
 ```sh
-bun run test         # bun test ./test — 103 tests in three files
+bun run test         # bun test ./test — 142 tests in four files
 bun run smoke        # tools/smoke.mjs — stub-context harness for apply() and all tools
 bun run catalog      # tools/validate-catalog.mjs — catalog against the running Bun
 bun run verify:claims # tools/verify-claims.mjs — re-settle the README's Bun CLI/serve/node:url claims
@@ -140,6 +140,33 @@ one suite per property domain:
 | `file URL properties` | `pathToFileURL` produces `file:` + encoded spaces; `fileURLToPath` round-trips and decodes; `fileURLToPathBuffer` returns the path bytes; non-file scheme rejects |
 | `domain properties` | `domainToASCII`/`domainToUnicode` round-trip; invalid domains return `""`/unchanged |
 | `URL-to-HTTP-options properties` | `protocol`, `hostname`, numeric `port`, `path`, `auth`, `hash`/`search`, `href` |
+
+`test/bun-1.4.4-regressions.test.ts` keeps Bun 1.4.4's release-note fixes
+traceable. Timings from the notes are **not** reproduced; the suites assert the
+behaviour each fix promises, plus two deliberately generous O(N²)-regression
+budgets:
+
+| Suite | Asserted |
+|---|---|
+| `URL.searchParams.append laziness` | 4000 appends under 250 ms (observed ~2 ms) and `href` reflects the last value; detached `URLSearchParams` within budget |
+| `Bun.Glob brace groups` | nested brace alternatives match; literal dotfile segment matches without `dot: true` |
+| `Bun.color fixes` | 24-bit number is opaque (`rgba(255, 0, 0, 1)`); ansi-16 emits printable digits; ansi-256 grey stays 232–255; `hsl`/`lab` outputs are parseable |
+| `Bun.Cookie RFC 6265 fixes` | `Expires` parses to the correct instant; `Expires`/`Max-Age` recorded in either order; `Max-Age` wins in `isExpired()` |
+| `parser fixes` | `Bun.YAML` combines surrogate-pair escapes; `Bun.JSONC.parse` throws `SyntaxError` on bad input and still accepts comments/trailing commas |
+| `Bun.stringWidth fixes` | bidi controls and Mongolian variation selectors are zero width; ANSI escapes ignored |
+| `Bun.escapeHTML zero-allocation path` | clean input returned unchanged; markup escaped exactly |
+| `Bun.hash.crc32` | standard check vector `crc32("123456789") === 0xCBF43926` |
+| `structuredClone fast paths` | dense number arrays, typed arrays and arrays of flat objects clone correctly and deeply |
+| `Buffer encodings` | hex/base64/base64url correctness and round-trips, including 64 KiB hex |
+| `node:path.parse` | empty string → all-empty structure; posix split; equal inputs → equal results |
+| `HTMLRewriter attribute fixes` | present-but-empty attribute → `""`; absent → `null` |
+| `Bun.indexOfLine non-ASCII scan` | newline after a multi-byte character found at the correct byte offset; ASCII case |
+| `expect matcher semantics` | `toContain` uses `===`: `[-0]` contains `0`, `[NaN]` does not contain `NaN`, identity still works |
+| `Response.json default formatting` | compact JSON output with no indent argument |
+
+`research/bun-1.4.4-release-notes.md` is the traceability table: every verified
+claim, every performance item deliberately left to Bun's own benchmarks, and the
+API gotchas found while writing the tests.
 
 `tools/verify-claims.mjs` runs the disputed Bun CLI forms against the installed
 Bun in a throwaway workspace copy and fails when the prose no longer matches:
