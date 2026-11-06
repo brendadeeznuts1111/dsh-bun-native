@@ -53,6 +53,57 @@ package script and reports `error: Script not found "lint"`. Bun's docs describe
 the linter and its 1,000+ rules, so the mode surfaces Bun's own error until the
 runtime supports it; the mode exists now so a future Bun needs no plugin change.
 
+## Dashboard
+
+The bundle also ships a browser half (`client.js`) that registers a **Bun native**
+page in Settings (`settings.section`, id `bun-native`, order 25). Opening it
+fetches `GET /api/bun-native/status` and renders four cards:
+
+| Card | Contents |
+|---|---|
+| Project | classification + confidence, directory, lockfile, linker, workspace root/member, scripts, signals |
+| Bun runtime | version, platform/arch, and the result of the native-properties probe (12 required APIs) |
+| API catalog | API and category counts, coverage bar against the running runtime, catalog/runtime version agreement, link to the Bun globals reference |
+| Health checks | the `bun_doctor` pass/warn/fail checks with their details |
+
+A **Refresh** button re-reads the endpoint; the page is read-only, so every
+state-changing action remains a normal tool call. Text is registered through the
+Client locale service (English and Chinese dictionaries), styles use only
+`--dsw-alias-*` theme tokens, and the endpoint refuses non-owner peers. When the
+workspace root is not itself a Bun project the Host picks the first child with
+Bun markers (lockfile, `bunfig.toml`, or a Bun script) so the page describes the
+project under the session's workspace.
+
+## Tests
+
+```sh
+bun run test        # bun test ./test — 16 tests
+bun run smoke       # tools/smoke.mjs — stub-context harness for apply() and all tools
+bun run catalog     # tools/validate-catalog.mjs — catalog against the running Bun
+```
+
+`test/plugin.test.ts` covers configuration parsing, the `workspace:`/`bunfig`/
+lockfile helpers, `rankApis`, the catalog (version match, unique names, every
+`Bun.*` entry exists on the runtime, every example transpiles, the verified
+`Bun.ModuleGraph` surface), project classification for the demo and the
+workspace member, `bun_doctor` reports (passing probe, missing native
+properties, failing `bun:test`), the dashboard snapshot's project discovery, and
+registration of the four tools + prompt section + status route.
+
+## Automation
+
+`bun_doctor` is the automation primitive: it returns a pass/warn/fail report and
+never throws for a failing project, so a scheduled task can run it and report
+deltas. A typical recipe, expressed with the schedules tool:
+
+> Every Monday at 09:00 in this workspace: run `bun_doctor` with `runTests: true`
+> and report every `fail` or new `warn` since the previous run.
+
+`bun_exec` supports the CI-side steps the same prompt may need: `mode: "ci"`
+(`bun ci`), `mode: "lint"` (`bun lint`, awaiting the 1.4 linter), `bun test`,
+`bun build` and workspace-filtered installs. The dashboard stays read-only and
+does not run tests on open, so automation cost stays in the scheduled task.
+
 ## Configuration
 
 Set in the profile patch layer; every key is optional.
