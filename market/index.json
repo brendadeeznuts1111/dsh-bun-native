@@ -1,12 +1,12 @@
 {
   "format": 1,
   "title": {
-    "en": "Bun-native DSH plugins",
-    "zh": "Bun 原生 DSH 插件"
+    "en": "Bun DSH plugins",
+    "zh": "Bun DSH 插件"
   },
   "description": {
-    "en": "Format-1 plugin market index for the Bun-native DSH bundle.",
-    "zh": "Bun 原生 DSH 组合包的 format-1 插件市场索引。"
+    "en": "Format-1 plugin market index for the Bun-native bundle and the Bun docs MCP connector.",
+    "zh": "Bun 原生组合包与 Bun 文档 MCP 连接器的 format-1 插件市场索引。"
   },
   "metadata": {
     "categories": {
@@ -28,6 +28,18 @@
         "title": {
           "en": "Offline",
           "zh": "离线"
+        }
+      },
+      "docs": {
+        "title": {
+          "en": "Docs",
+          "zh": "文档"
+        }
+      },
+      "mcp": {
+        "title": {
+          "en": "MCP",
+          "zh": "MCP"
         }
       }
     },
@@ -70,10 +82,66 @@
           "bun-native",
           "workspace",
           "monorepo",
+          "docs",
+          "mcp",
           "dsh-plugin"
         ],
         "sortKeys": {
-          "published": 1794004782
+          "published": 1794007177
+        }
+      },
+      "dist-tags": {
+        "latest": "1.1.0"
+      },
+      "versions": [
+        {
+          "version": "1.1.0",
+          "publishTimestamp": 1794007177,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/brendadeeznuts1111/dsh-bun-native",
+            "commit": "3fdda029075a4fd50a264c9101ef118f09cba5a5",
+            "path": "bun-native"
+          },
+          "engines": {
+            "dsh": ">=0.2.2-rc.1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "@local/bun-docs-mcp",
+      "title": {
+        "en": "Bun docs MCP",
+        "zh": "Bun 文档 MCP"
+      },
+      "description": {
+        "en": "Connects Bun's official documentation MCP server so the agent can search, grep and read bun.com pages.",
+        "zh": "连接 Bun 官方文档 MCP 服务器，让智能体搜索、检索并阅读 bun.com 页面。"
+      },
+      "icon": "icons/bun-docs-mcp.svg",
+      "author": "brendadeeznuts1111",
+      "homepage": "https://github.com/brendadeeznuts1111/dsh-bun-native#readme",
+      "repository": {
+        "url": "https://github.com/brendadeeznuts1111/dsh-bun-native",
+        "directory": "bun-docs-mcp"
+      },
+      "metadata": {
+        "category": "developer-tools",
+        "labels": [
+          "bun",
+          "docs",
+          "mcp"
+        ],
+        "keywords": [
+          "bun",
+          "docs",
+          "mcp",
+          "documentation",
+          "dsh-plugin"
+        ],
+        "sortKeys": {
+          "published": 1794007177
         }
       },
       "dist-tags": {
@@ -82,12 +150,12 @@
       "versions": [
         {
           "version": "1.0.0",
-          "publishTimestamp": 1794004782,
+          "publishTimestamp": 1794007177,
           "source": {
             "type": "git",
             "url": "https://github.com/brendadeeznuts1111/dsh-bun-native",
-            "commit": "c1b67c0132bd4cd5ef7ef5b90bea82c70cf32f4f",
-            "path": "bun-native"
+            "commit": "3fdda029075a4fd50a264c9101ef118f09cba5a5",
+            "path": "bun-docs-mcp"
           },
           "engines": {
             "dsh": ">=0.2.2-rc.1"
