@@ -1,0 +1,20 @@
+{
+  "name": "@local/market-index",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Format-1 DSH plugin market index and its build, validate and preview tooling.",
+  "scripts": {
+    "validate": "bun validate-index.mjs index.json",
+    "build": "bun build-index.mjs",
+    "serve": "bun serve.mjs"
+  },
+  "files": [
+    "index.json",
+    "icons/*.svg",
+    "build-index.mjs",
+    "validate-index.mjs",
+    "serve.mjs",
+    "README.md"
+  ]
+}
