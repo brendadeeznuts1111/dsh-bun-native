@@ -202,6 +202,15 @@ await tools.get('bun_exec').execute({ mode: 'lint', target: 'src', args: ['--fix
 assert.deepEqual(subprocess.calls.at(-1).argv, ['bun', 'lint', 'src', '--fix'])
 report('bun_exec lint argv', true, 'bun lint --explain prefer-const; bun lint src --fix')
 
+// --- bun_exec check --------------------------------------------------------
+subprocess.enqueue({ stdout: '', stderr: '', exitCode: 0 })
+await tools.get('bun_exec').execute({ mode: 'check', target: 'src', args: ['--no-script'] }, exec)
+assert.deepEqual(subprocess.calls.at(-1).argv, ['bun', 'check', 'src', '--no-script'])
+subprocess.enqueue({ stdout: '', stderr: '', exitCode: 0 })
+await tools.get('bun_exec').execute({ mode: 'check', args: ['-p', 'packages/server', '-b'] }, exec)
+assert.deepEqual(subprocess.calls.at(-1).argv, ['bun', 'check', '-p', 'packages/server', '-b'])
+report('bun_exec check argv', true, 'bun check src --no-script; bun check -p packages/server -b')
+
 // --- bun_exec failure and timeout -----------------------------------------
 subprocess.enqueue({ stdout: '', stderr: 'error: Script not found "nope"\n', exitCode: 1 })
 const failed = await tools.get('bun_exec').execute({ mode: 'run', target: 'nope' }, exec)

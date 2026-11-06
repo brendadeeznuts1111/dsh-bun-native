@@ -11,7 +11,7 @@ system-prompt section:
 |---|---|---|
 | `bun_project` | read-only | Classifies a directory (`bun-native` / `bun-capable` / `none`) with a `confidence` and an ordered `signals` list, and reports its lockfile (`bun.lock` text or legacy `bun.lockb`, plus any foreign lockfiles), `bunfig.toml` sections, `package.json` scripts and dependency counts, workspaces, TypeScript setup, `node_modules`/isolated-store state, and the installed Bun version. |
 | `bun_api` | read-only | Answers from a bundled offline digest of the Bun globals (`Bun.serve`, `Bun.file`, `Bun.$`, `bun:sqlite`, `Bun.spawn`, hashing, compression, parsers, …) with signatures, examples and doc links — no network round-trip. |
-| `bun_exec` | runs a process | Runs a package.json script or file (`bun run`), `bun test`, `bun install` (with optional `filter`), `bun add`, `bun ci`, `bun lint`, `bun pm <utility>` or `bun --eval <code>` inside the session's sandbox policy, capped by a timeout, reporting stdout/stderr and the exit status. |
+| `bun_exec` | runs a process | Runs a package.json script or file (`bun run`), `bun test`, `bun install` (with optional `filter`), `bun add`, `bun ci`, `bun check`, `bun lint`, `bun pm <utility>` or `bun --eval <code>` inside the session's sandbox policy, capped by a timeout, reporting stdout/stderr and the exit status. |
 | `bun_doctor` | read-only | Runs a health report: a probe inside the project's Bun (version, platform, native APIs, `node:url` compatibility), project checks (classification, lockfile, workspace, linker, package manifest), catalog agreement (curated names resolve on this runtime plus coverage), and optionally the project's `bun:test` suite. |
 | `bun_api` | read-only | Answers from the curated offline digest of Bun globals (70 entries over the runtime's 117 name-level `Bun` globals on 1.4.4; the rest are listed by `validate-catalog`), with signatures, examples and doc links — no network round-trip. |
 
@@ -58,6 +58,22 @@ Canary `1.4.4-canary.1+b1305ddc7` does ship it: `--rules -f json` returns 1,048
 rules, `--explain` prints rule docs, and `--fix`, `--format json`, `--doctor`,
 `--init`, `--staged` and type-aware rules were verified end-to-end through this
 mode; see the research notes for the matrix.
+
+## Type checking
+
+`bun_exec` mode `check` runs the built-in type checker:
+
+```json
+{ "mode": "check", "target": "src", "args": ["--no-script"] }
+```
+
+`target` is a file or directory (`bun check src`); `args` carries flags such as
+`["--no-script"]`, `["-p", "packages/server"]`, `["-b"]`, `["--all"]` or
+`["--no-pretty"]`. A `package.json` `check` script shadows the type checker
+(`bun check` runs the script); `--no-script` forces the checker. `bun check`
+writes nothing — use `bun build`/`tsc` for emitted files. The separate
+`bun --check` / `bun test --check` / `bun build --check` pre-run checks are a
+different command.
 
 ## Dashboard
 

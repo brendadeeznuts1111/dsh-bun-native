@@ -19,7 +19,7 @@ market/       the format-1 plugin market index + its build/validate tooling
 |---|---|---|
 | `bun_project` | read-only | Classifies a directory (`bun-native` / `bun-capable` / `none`) with confidence and ordered signals; reports lockfile kind and version, `bunfig.toml` sections, scripts, workspace root/member relationship, `workspace:` protocol dependencies, linker strategy, and the live Bun version. |
 | `bun_api` | read-only | Curated offline digest of the Bun global API surface (70 entries: 69 name-level `Bun` members + `bun:sqlite Database`; 48 of 1.4.4's 117 name-level globals not curated yet) with signatures, examples and docs links — no network round-trip; warns when the runtime differs from the digest pin. |
-| `bun_exec` | runs a process | `bun run`, `bun test`, `bun install` (with `--filter`), `bun add`, `bun ci`, `bun pm`, and `bun --eval`, inside the session sandbox with bounded output and timeout termination. |
+| `bun_exec` | runs a process | `bun run`, `bun test`, `bun install` (with `--filter`), `bun add`, `bun ci`, `bun check`, `bun lint`, `bun pm`, and `bun --eval`, inside the session sandbox with bounded output and timeout termination. |
 | `bun_doctor` | read-only | Runtime probe (Bun native APIs plus `node:url` compatibility), project health, catalog agreement and optionally the project's `bun:test` suite; returns a pass/warn/fail report instead of throwing. |
 
 It also exposes a read-only dashboard endpoint (`/api/bun-native/status`,
@@ -32,7 +32,7 @@ and Chinese, theme tokens only).
 
 `bun_doctor` is also the automation primitive: a scheduled task can ask the agent
 to run it (optionally with `runTests: true`) and report new failures or warnings;
-`bun_exec` covers the matching steps (`ci`, `lint`, `test`, `build`, filtered
+`bun_exec` covers the matching steps (`ci`, `check`, `lint`, `test`, `build`, filtered
 installs).
 
 ### `@local/bun-docs-mcp`
