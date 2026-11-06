@@ -21,7 +21,7 @@
       "name": "Bun.serve",
       "category": "networking",
       "kind": "function",
-      "summary": "Starts an HTTP(S) server with a fetch handler and optional WebSocket, static-route and TLS options. Returns a Server whose url, port and stop() let you inspect and shut it down.",
+      "summary": "Starts an HTTP(S) server with a fetch handler and optional WebSocket, static-route and TLS options. Returns a Server whose url, protocol, port, hostname and stop() let you inspect and shut it down.",
       "signature": "Bun.serve<WebSocketData = undefined, R extends string = never>(options: Bun.Serve.Options<WebSocketData, R>): Bun.Server<WebSocketData>",
       "docsUrl": "https://bun.com/docs/runtime/http/server",
       "runtime": "server",

@@ -13,8 +13,8 @@
  * Usage: bun bun-native/tools/validate-catalog.mjs
  */
 
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 
 const here = dirname(import.meta.path)
 const catalogPath = join(here, '..', 'data', 'bun-globals.json')
@@ -42,6 +42,7 @@ for (const category of catalog.categories ?? []) {
 }
 
 const names = new Set()
+const missingOnRuntime = []
 const transpiler = new Bun.Transpiler({ loader: 'ts' })
 const counts = new Map()
 
@@ -65,7 +66,10 @@ for (const [index, entry] of catalog.apis.entries()) {
   }
 
   const runtimeName = /^Bun\.([A-Za-z_$][\w$]*)$/u.exec(entry.name)?.[1]
-  if (runtimeName !== undefined && !(runtimeName in Bun)) fail(`${at} ${entry.name} does not exist on Bun ${Bun.version}`)
+  if (runtimeName !== undefined && !(runtimeName in Bun)) {
+    missingOnRuntime.push(entry.name)
+    fail(`${at} ${entry.name} does not exist on Bun ${Bun.version}`)
+  }
 }
 
 for (const category of categoryIds) {
@@ -79,6 +83,41 @@ const uncovered = Object.getOwnPropertyNames(Bun)
 
 console.log(`catalog: ${catalog.apis.length} APIs in ${categoryIds.size} categories (Bun ${Bun.version})`)
 if (uncovered.length > 0) console.log(`uncovered runtime globals (${uncovered.length}, curation only): ${uncovered.join(', ')}`)
+
+// A machine-readable report is the feed for a catalog governor: it separates
+// "curated and present" from "not curated yet" without re-parsing the digest.
+const jsonIndex = process.argv.indexOf('--json')
+if (jsonIndex !== -1) {
+  const target = process.argv[jsonIndex + 1]
+  if (target === undefined || target.startsWith('--')) {
+    console.error('--json needs a destination path')
+    process.exit(2)
+  }
+  const report = {
+    format: 1,
+    tool: '@local/bun-native/tools/validate-catalog',
+    runtimeVersion: Bun.version,
+    catalogVersion: catalog.bunVersion,
+    generatedAt: new Date().toISOString(),
+    totals: {
+      entries: catalog.apis.length,
+      categories: categoryIds.size,
+      nameLevelGlobals: Object.getOwnPropertyNames(Bun).length,
+      curated: covered.size,
+      uncovered: uncovered.length,
+      missingOnRuntime: missingOnRuntime.length,
+      errors,
+    },
+    categories: Object.fromEntries([...counts.entries()].sort(([left], [right]) => left.localeCompare(right))),
+    curated: [...new Set(catalog.apis.map((entry) => /^Bun\.([A-Za-z_$][\w$]*)$/u.exec(entry.name)?.[1]).filter(Boolean))].sort(),
+    uncovered,
+    missingOnRuntime,
+  }
+  const destination = resolve(target)
+  writeFileSync(destination, `${JSON.stringify(report, null, 2)}\n`)
+  console.log(`report written to ${destination}`)
+}
+
 if (errors > 0) {
   console.error(`\n${errors} catalog problem(s)`)
   process.exit(1)

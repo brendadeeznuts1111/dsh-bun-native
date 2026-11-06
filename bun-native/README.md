@@ -97,8 +97,18 @@ discovery, the catalog-version drift warning, and registration of the four tools
 `tools/verify-claims.mjs` runs the disputed Bun CLI forms against the installed
 Bun in a throwaway workspace copy and fails when the prose no longer matches:
 `--filter` forms and their exact errors, `bun add --cwd`, the `bun pm hash`
-family, and `bun pm bin`. Its output is also the source for the claims section
-below.
+family, and `bun pm bin`. It also runs **Bun.serve property tests** in-process
+and against the digest's own example: `server.url` is a `URL` with
+`protocol === "http:"` without TLS, `server.port`/`hostname` agree with it,
+`server.protocol` exists and is `"http"` (no colon — the URL carries the colon),
+a `/json` handler round-trips, a plain handler returns its text, `server.stop()`
+closes the listener, and the `Bun.serve` example in `data/bun-globals.json`
+executes as written. Its output is also the source for the claims section below.
+
+`tools/validate-catalog.mjs --json <path>` writes a machine-readable catalog
+report (`curated`, `uncovered`, `missingOnRuntime`, per-category counts,
+runtime/catalog versions, error count) — the feed a catalog governor can consume
+instead of maintaining a second list.
 
 ## Automation
 
@@ -250,6 +260,12 @@ against the installed Bun, in a throwaway copy of `examples/bun-workspace`.
   `bin` the `node_modules/.bin` folder path. `bun pm` also has `pkg`, `cache`
   (`rm`, `prune`), `fetch`, `migrate`, `trust`, `untrusted`, `pack`, `licenses`,
   `why`, `diff`, `scan` — all reachable through `mode: "pm"`.
+- `Bun.serve` returns a `Server` whose `url` is a `URL` (`protocol === "http:"`
+  without TLS, `port`/`hostname` agreeing with `server.port`/`server.hostname`),
+  plus a separate `server.protocol` property whose value is `"http"` — without
+  the colon, unlike `server.url.protocol`. These are asserted by
+  `bun run verify:claims`, together with a live handler round-trip and
+  `server.stop()` closing the listener.
 - `bun install` that needs the global cache (`~/.bun/install/cache`) is denied
   under `workspace-write` (EPERM) exactly like the host shell; workspace-only
   installs do work. `bun_exec` has no sandbox-escalation parameter.

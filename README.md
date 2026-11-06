@@ -98,7 +98,7 @@ pinning, and the two-phase release procedure.
 - `bun-native/tools/smoke.mjs` — exercises `apply()`, all four tools, the prompt section (including the Bun docs MCP pointer) and the doctor report against a stub Cordis context.
 - `bun-native/test/plugin.test.ts` — `bun test ./test`: 16 Bun-native property and behaviour tests (catalog names exist on the runtime, examples transpile, workspace classification, doctor pass/fail reports, dashboard discovery, registration of tools/prompt/route).
 - `bun-native/tools/validate-catalog.mjs` — checks every catalog entry against the running Bun and reports the globals not curated yet.
-- `bun-native/tools/verify-claims.mjs` — re-settles the README's Bun CLI claims (`--filter` forms, `bun add --cwd`, the `bun pm hash` family) against the installed Bun and fails when the prose drifts.
+- `bun-native/tools/verify-claims.mjs` — re-settles the README's Bun CLI claims (`--filter` forms, `bun add --cwd`, the `bun pm hash` family) against the installed Bun and fails when the prose drifts; it also runs Bun.serve property tests (`server.url` protocol/port/hostname, `server.protocol`, handler round-trips, `stop()`), including executing the digest's own `Bun.serve` example.
 - `bun-docs-mcp` — a live `initialize` + `search_bun` call against <https://bun.com/docs/mcp> returns bun.com results; the server advertises the four tools and `bun://skill`.
 
 ## Licence

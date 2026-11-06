@@ -115,6 +115,71 @@ try {
   const bin = run(['pm', 'bin'])
   check('`bun pm bin` prints the bin folder', 'exit 0 and a path ending in node_modules/.bin', bin, bin.exit === 0 && /node_modules[\\/]\.bin$/u.test(bin.stdout))
 
+  // --- Bun.serve property tests (digest vs runtime) ------------------------
+  const catalog = JSON.parse(readFileSync(join(workspace, 'data', 'bun-globals.json'), 'utf8'))
+  const serveEntry = catalog.apis.find((entry) => entry.name === 'Bun.serve')
+  check(
+    'the digest has a Bun.serve entry whose example uses server.url',
+    'entry exists, is in networking, and its example inspects the URL',
+    { cmd: '(catalog lookup)', exit: serveEntry === undefined ? 1 : 0, stdout: serveEntry === undefined ? '' : serveEntry.signature.slice(0, 160), stderr: '' },
+    serveEntry !== undefined && serveEntry.category === 'networking' && serveEntry.example.includes('server.url'),
+  )
+
+  const serveCheck = (claim, expectation, passed, detail) => {
+    check(claim, expectation, { cmd: '(in-process Bun.serve)', exit: passed ? 0 : 1, stdout: detail, stderr: '' }, passed)
+  }
+
+  let server
+  try {
+    server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        const url = new URL(request.url)
+        if (url.pathname === '/json') return Response.json({ ok: true })
+        return new Response(`path:${url.pathname}`)
+      },
+    })
+    const url = server.url
+    serveCheck('Bun.serve returns a URL at server.url', 'server.url instanceof URL', url instanceof URL, String(url))
+    serveCheck('server.url.protocol is http: without TLS', 'url.protocol === "http:"', url.protocol === 'http:', url.protocol)
+    serveCheck('server.port matches the URL port', 'Number(url.port) === server.port', Number(url.port) === server.port, `port=${server.port} url.port=${url.port}`)
+    serveCheck('the URL has a hostname', 'url.hostname is non-empty', url.hostname.length > 0, `hostname=${url.hostname} hostname=${server.hostname}`)
+    const hasProtocolProperty = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(server), 'protocol') !== undefined || 'protocol' in server
+    serveCheck(
+      'Server.protocol is recorded, not assumed',
+      'the property test records whether Server.protocol exists; protocol is authoritative on server.url',
+      true,
+      hasProtocolProperty ? `Server.protocol=${String(server.protocol)}` : 'Server.protocol is undefined; use server.url.protocol',
+    )
+    const jsonResponse = await fetch(new URL('/json', url))
+    const jsonBody = await jsonResponse.json()
+    serveCheck('the fetch handler answers at server.url', 'HTTP 200 with {ok:true}', jsonResponse.status === 200 && jsonBody.ok === true, `status=${jsonResponse.status} body=${JSON.stringify(jsonBody)}`)
+    const textResponse = await fetch(new URL('/hello', url))
+    serveCheck('a non-JSON path returns its plain response', 'body "path:/hello"', (await textResponse.text()) === 'path:/hello')
+    server.stop()
+    let closed = false
+    try {
+      await fetch(url, { signal: AbortSignal.timeout(1_500) })
+    } catch {
+      closed = true
+    }
+    serveCheck('server.stop() closes the listener', 'the next fetch fails', closed)
+  } finally {
+    try {
+      server?.stop()
+    } catch {
+      // Already stopped.
+    }
+  }
+
+  const exampleRun = run(['-e', serveEntry.example])
+  check(
+    'the digest Bun.serve example runs as written',
+    'exit 0 and its output contains the http:// URL it logs',
+    exampleRun,
+    exampleRun.exit === 0 && /http:\/\//u.test(exampleRun.stdout),
+  )
+
   // --- runtime, for the coverage wording -----------------------------------
   const probe = run(['--eval', 'console.log(JSON.stringify({ version: Bun.version, globals: Object.getOwnPropertyNames(Bun).length }))'])
   const runtime = JSON.parse(probe.stdout)

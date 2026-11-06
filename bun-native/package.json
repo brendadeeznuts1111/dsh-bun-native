@@ -1,6 +1,6 @@
 {
   "name": "@local/bun-native",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "private": true,
   "type": "module",
   "description": "Bun-native project awareness, an offline Bun globals catalog, sandboxed Bun execution, a project doctor, and live Bun docs via a companion MCP bundle.",
