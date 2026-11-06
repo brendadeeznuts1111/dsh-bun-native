@@ -100,6 +100,17 @@ bun market/build-index.mjs \
 - Channel names are npm dist-tags: they must not be exact versions or SemVer
   ranges. `latest=1.2.4`, `next=1.3.0-rc.1` is a typical stable/preview pair.
 
+The release tool rebuilds the index in its market phase, so pass the same pins
+through `-ReleaseArgs` — otherwise it rebuilds a single `latest` channel from the
+recorded bundle commit:
+
+```powershell
+pwsh scratch/publish-market.ps1 -Phase market -ReleaseArgs `
+  '--release','bun-native=1.2.5@4e2b501cd645605218a5938eb7f45e2dea2d30d5#1794015173', `
+  '--release','bun-native=1.2.4@565d85700f912a1dd795def0adae906bef4c7176#1793996858', `
+  '--tag','bun-native:latest=1.2.5','--tag','bun-native:legacy=1.2.4'
+```
+
 ## Notes and limits
 
 - The npm/Git pinning rule is why these bundles cannot be listed as local
