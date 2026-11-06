@@ -87,20 +87,20 @@
           "dsh-plugin"
         ],
         "sortKeys": {
-          "published": 1794015721
+          "published": 1794016173
         }
       },
       "dist-tags": {
-        "latest": "1.2.8"
+        "latest": "1.2.9"
       },
       "versions": [
         {
-          "version": "1.2.8",
-          "publishTimestamp": 1794015721,
+          "version": "1.2.9",
+          "publishTimestamp": 1794016173,
           "source": {
             "type": "git",
             "url": "https://github.com/brendadeeznuts1111/dsh-bun-native",
-            "commit": "8f4343e31a4715fc533d41f742e20eff45173552",
+            "commit": "b2a4761991771132876b239e51e94b9a98b23396",
             "path": "bun-native"
           },
           "engines": {
@@ -141,7 +141,7 @@
           "dsh-plugin"
         ],
         "sortKeys": {
-          "published": 1794015721
+          "published": 1794016173
         }
       },
       "dist-tags": {
@@ -150,11 +150,11 @@
       "versions": [
         {
           "version": "1.0.0",
-          "publishTimestamp": 1794015721,
+          "publishTimestamp": 1794016173,
           "source": {
             "type": "git",
             "url": "https://github.com/brendadeeznuts1111/dsh-bun-native",
-            "commit": "8f4343e31a4715fc533d41f742e20eff45173552",
+            "commit": "b2a4761991771132876b239e51e94b9a98b23396",
             "path": "bun-docs-mcp"
           },
           "engines": {

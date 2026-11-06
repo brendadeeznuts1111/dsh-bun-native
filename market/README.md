@@ -26,14 +26,25 @@ publishing guide is <https://deepseek-harness.github.io/deepseek-harness/guide/p
 
 ## Index URL
 
-Published from the `main` branch of <https://github.com/brendadeeznuts1111/dsh-bun-native>:
+DSH refuses an index served behind a redirect, so the index must be a **direct**
+raw URL. Two forms are published from
+<https://github.com/brendadeeznuts1111/dsh-bun-native>:
 
-- index: `https://raw.githubusercontent.com/brendadeeznuts1111/dsh-bun-native/main/market/index.json`
-- icons: `…/main/market/icons/bun-native.svg`, `…/main/market/icons/bun-docs-mcp.svg`
-- jsDelivr mirror: `https://cdn.jsdelivr.net/gh/brendadeeznuts1111/dsh-bun-native@main/market/index.json`
+| Purpose | URL | Freshness |
+|---|---|---|
+| latest (DSH index source) | `https://raw.githubusercontent.com/brendadeeznuts1111/dsh-bun-native/main/market/index.json` | GitHub's raw CDN caches branch paths for **~5 minutes**; a just-published version can be hidden behind the previous document for that window |
+| exact release (pinned, recommended for reproducible installs) | `https://raw.githubusercontent.com/brendadeeznuts1111/dsh-bun-native/v<version>/market/index.json` | direct and immutable per tag; serves the release's document immediately once the tag exists |
+| commit-pinned | `https://raw.githubusercontent.com/brendadeeznuts1111/dsh-bun-native/<40-hex-commit>/market/index.json` | direct and immutable |
 
-DSH refuses an index served behind a redirect, so the raw URL is the primary
-source; the jsDelivr copy is the same document for faster cold loads.
+Icons: `…/main/market/icons/bun-native.svg`, `…/main/market/icons/bun-docs-mcp.svg`.
+
+The release step creates a `v<version>` tag and a matching GitHub release whose
+asset (`…/releases/download/v<version>/index.json`, plus the moving
+`…/releases/latest/download/index.json`) is a redirect to an attachment. That is
+useful as a download mirror for scripts, but **not usable as a DSH index
+source**. The jsDelivr `@main` mirror caches branch refs for 12 hours, so it lags
+further than raw; if a second CDN is needed, pin jsDelivr to a commit
+(`https://cdn.jsdelivr.net/gh/brendadeeznuts1111/dsh-bun-native@<commit>/market/index.json`).
 
 ## Register it
 
