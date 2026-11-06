@@ -15,6 +15,11 @@
   "engines": {
     "dsh": ">=0.2.2-rc.1"
   },
+  "scripts": {
+    "test": "bun test ./test",
+    "smoke": "bun tools/smoke.mjs",
+    "catalog": "bun tools/validate-catalog.mjs"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

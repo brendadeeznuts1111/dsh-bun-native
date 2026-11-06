@@ -1215,6 +1215,44 @@ async function pickDashboardDirectory(ctx, directory, signal) {
 }
 
 /**
+ * Resolve the directory the dashboard describes. An HTTP request carries no
+ * Session, so read the workspace of a live Agent first, then the workspace
+ * registry, and only then the deployment default.
+ * @param {any} ctx - the plugin context.
+ * @returns {string}
+ */
+function dashboardBaseDirectory(ctx) {
+  const workingDirectory = ctx.get('workingDirectory')
+  const agents = ctx.get('agents')
+  if (workingDirectory !== undefined && agents !== undefined) {
+    try {
+      const live = typeof agents.list === 'function' ? agents.list() : []
+      for (const agent of live) {
+        try {
+          const cwd = workingDirectory.get(agent.session)
+          if (typeof cwd === 'string' && cwd.length > 0) return cwd
+        } catch {
+          // A disposed Agent's Session may already be gone; try the next one.
+        }
+      }
+    } catch {
+      // Fall through to the registry.
+    }
+  }
+  const registry = ctx.get('workspaceRegistry')
+  if (registry !== undefined && typeof registry.list === 'function') {
+    try {
+      for (const workspace of registry.list()) {
+        if (typeof workspace.path === 'string' && workspace.path.length > 0) return workspace.path
+      }
+    } catch {
+      // Fall through to the deployment default.
+    }
+  }
+  return workingDirectory !== undefined && typeof workingDirectory.defaultDirectory === 'string' ? workingDirectory.defaultDirectory : process.cwd()
+}
+
+/**
  * Build the dashboard payload the Client fetches. Cheap checks only: the
  * dashboard must not run a project's test suite on every open.
  * @param {any} ctx - the plugin context.
@@ -1223,8 +1261,7 @@ async function pickDashboardDirectory(ctx, directory, signal) {
  * @returns {Promise<Record<string, any>>}
  */
 async function buildDashboardSnapshot(ctx, config, request) {
-  const workingDirectory = ctx.get('workingDirectory')
-  const base = workingDirectory !== undefined && typeof workingDirectory.defaultDirectory === 'string' ? workingDirectory.defaultDirectory : process.cwd()
+  const base = dashboardBaseDirectory(ctx)
   const directory = await pickDashboardDirectory(ctx, base, request.signal)
   const exec = { signal: request.signal, agent: undefined, callId: 'bun-native-dashboard', name: 'bun_native_dashboard', arguments: {} }
   const report = await buildDoctorReport(ctx, exec, config, directory, { checks: ['runtime', 'project', 'catalog'] })
