@@ -143,11 +143,16 @@ function renderExec(value) {
  * @returns {string}
  */
 function renderApi(value) {
+  const warning = value.warning === undefined ? '' : `⚠ ${value.warning}\n\n`
   if (value.entries.length === 0) {
-    const lines = [`${value.total} Bun APIs available. No entry matched; list a category or try a name such as "Bun.serve".`, '']
+    const lines = [
+      `${value.total} curated Bun APIs available. No entry matched; list a category or try a name such as "Bun.serve".`,
+      'The digest curates a subset of the runtime surface (70 entries over 117 name-level `Bun` globals on 1.4.4), so a missing name is not proof of a missing API.',
+      '',
+    ]
     for (const category of value.categories) lines.push(`- ${category.id} (${category.count}) — ${category.title}`)
     lines.push('', 'Live docs: if the Bun docs MCP server is connected, use mcp__bun_docs__search_bun, read_bun_page, grep_bun or list_bun_pages for guides and full pages beyond this digest.')
-    return lines.join('\n')
+    return warning + lines.join('\n')
   }
   const blocks = []
   for (const entry of value.entries) {
@@ -158,7 +163,7 @@ function renderApi(value) {
     if (entry.example !== undefined) lines.push(`example:\n\`\`\`ts\n${entry.example}\n\`\`\``)
     blocks.push(lines.join('\n'))
   }
-  return blocks.join('\n\n')
+  return warning + blocks.join('\n\n')
 }
 
 /**
@@ -507,28 +512,47 @@ async function inspectProject(ctx, exec, directory, config, readRuntime) {
   else if (hasPackage || nodeModules) kind = 'bun-capable'
   let confidence = kind === 'bun-native' ? (strongSignal ? 'strong' : mediumSignal ? 'medium' : 'weak') : kind === 'bun-capable' ? 'capable' : 'none'
 
+  // A repo that keeps another package manager's lockfile next to bun.lock is not
+  // Bun-only; keep the classification but lower confidence, because
+  // promptGuidance must not forbid npm/yarn outright there.
+  const mixedLockfiles = lockfile !== null && otherLockfiles.length > 0
+  if (mixedLockfiles) {
+    signals.push('mixed-lockfiles')
+    if (confidence === 'strong') confidence = 'medium'
+  }
+
   // Bun's workspace root owns the single bun.lock; a member directory has none
   // of its own, so resolve the ancestor root before finalizing classification.
   let workspace = null
   let workspaceRootInfo
+  let workspaceCapped = false
+  let unmatchedWorkspace = null
   if (lockfile === null) {
     const found = await findWorkspaceRoot(fs, directory, signal)
-    if (found !== undefined) {
+    if (found !== undefined && found.capped === true) {
+      workspaceCapped = true
+    } else if (found !== undefined) {
       workspaceRootInfo = found
-      const catalogs = readWorkspaceCatalogs(found.raw)
-      workspace = {
-        role: 'member',
-        root: found.root,
-        patterns: found.patterns,
-        memberPath: relative(found.root, directory).split(sep).join('/'),
-        ...(pkg !== null && typeof pkg.name === 'string' ? { memberName: pkg.name } : {}),
-        ...(found.lockfile === null ? {} : { rootLockfile: found.lockfile }),
-        ...(catalogs.catalog.length === 0 ? {} : { catalog: catalogs.catalog }),
-        ...(catalogs.catalogs.length === 0 ? {} : { catalogs: catalogs.catalogs }),
+      const memberPath = relative(found.root, directory).split(sep).join('/')
+      if (matchesWorkspacePatterns(memberPath, found.patterns)) {
+        const catalogs = readWorkspaceCatalogs(found.raw)
+        workspace = {
+          role: 'member',
+          root: found.root,
+          patterns: found.patterns,
+          memberPath,
+          ...(pkg !== null && typeof pkg.name === 'string' ? { memberName: pkg.name } : {}),
+          ...(found.lockfile === null ? {} : { rootLockfile: found.lockfile }),
+          ...(catalogs.catalog.length === 0 ? {} : { catalog: catalogs.catalog }),
+          ...(catalogs.catalogs.length === 0 ? {} : { catalogs: catalogs.catalogs }),
+        }
+        signals.push('workspace:member')
+        kind = 'bun-native'
+        confidence = found.lockfile !== null ? 'strong' : mediumSignal ? 'medium' : 'weak'
+        if (mixedLockfiles && confidence === 'strong') confidence = 'medium'
+      } else {
+        unmatchedWorkspace = { root: found.root, patterns: found.patterns, memberPath: memberPath.length === 0 ? '.' : memberPath }
       }
-      signals.push('workspace:member')
-      kind = 'bun-native'
-      confidence = found.lockfile !== null ? 'strong' : mediumSignal ? 'medium' : 'weak'
     }
   } else if (rawPackage !== undefined) {
     const patterns = readWorkspaces(rawPackage.workspaces)
@@ -557,6 +581,9 @@ async function inspectProject(ctx, exec, directory, config, readRuntime) {
   if (kind === 'bun-native' && lockfile === null && workspace === null) notes.push('This is a Bun project without a lockfile; run `bun install` to create bun.lock and commit it.')
   if (kind === 'bun-capable') notes.push('package.json shows no Bun marker (no bun.lock/bun.lockb, bunfig.toml, `packageManager: bun@…`, bun in scripts, .bun-version, or @types/bun); Bun can run it, but the repository is not Bun-first.')
   if (kind === 'none') notes.push('No package.json or Bun marker was found in this directory; nothing to run here yet.')
+  if (mixedLockfiles) notes.push(`Mixed package-manager repo: ${lockfile.file} coexists with ${otherLockfiles.join(', ')}; confidence is ${confidence}, so do not assume the repo is Bun-only.`)
+  if (workspaceCapped) notes.push('Workspace root not found within 8 ancestor directories; the root may be deeper. Run `bun install` at the repository root or inspect that directory directly.')
+  if (unmatchedWorkspace !== null) notes.push(`The nearest workspaces declaration is at ${unmatchedWorkspace.root} (patterns: ${unmatchedWorkspace.patterns.join(', ')}), but this directory (${unmatchedWorkspace.memberPath}) is not matched by those globs, so it is not treated as a workspace member.`)
   if (workspace !== null && workspace.role === 'member') {
     notes.push(`This directory is workspace member${workspace.memberName === undefined ? '' : ` \`${workspace.memberName}\``} of the Bun workspace rooted at ${workspace.root} (patterns: ${workspace.patterns.join(', ')}); the root owns ${workspace.rootLockfile === undefined ? 'the lockfile' : workspace.rootLockfile.file}.`)
     if (workspace.rootLockfile === undefined) notes.push('The workspace root has no Bun lockfile yet; run `bun install` there to create it.')
@@ -696,11 +723,13 @@ async function describeLockfile(fs, directory, signal) {
  */
 async function findWorkspaceRoot(fs, directory, signal) {
   let current = dirname(directory)
+  let sawPackage = false
   for (let depth = 0; depth < 8; depth += 1) {
     const parent = dirname(current)
-    if (current === parent || current.length === 0) return undefined
+    if (current === parent || current.length === 0) return sawPackage ? { capped: true } : undefined
     const pkg = await readPackageJsonAt(fs, current, signal)
     if (pkg !== undefined && pkg.raw !== undefined) {
+      sawPackage = true
       const patterns = readWorkspaces(pkg.raw.workspaces)
       if (patterns.length > 0) {
         const lock = await describeLockfile(fs, current, signal)
@@ -720,7 +749,51 @@ async function findWorkspaceRoot(fs, directory, signal) {
     }
     current = parent
   }
-  return undefined
+  // The cap is a defined failure mode, not a silent "no lockfile": report it so
+  // the caller can say that the root was not found within 8 ancestors.
+  return sawPackage ? { capped: true } : undefined
+}
+
+/**
+ * Test one workspace-relative path against the root's `workspaces` patterns.
+ * Supports `*` (one segment), `**` (any segments), `?`, and leading `!`
+ * negation, which covers the documented glob forms.
+ * @param {string} memberPath - `/`-separated path relative to the workspace root.
+ * @param {string[]} patterns - declared workspace globs.
+ * @returns {boolean}
+ */
+function matchesWorkspacePatterns(memberPath, patterns) {
+  const compiled = (pattern) => {
+    const normalized = pattern.replace(/^\.\//u, '').replace(/\/+$/u, '')
+    let source = ''
+    for (let index = 0; index < normalized.length; index += 1) {
+      const character = normalized[index]
+      if (character === '*') {
+        if (normalized[index + 1] === '*') {
+          source += '.*'
+          index += 1
+          if (normalized[index + 1] === '/') {
+            source += '/'
+            index += 1
+          }
+        } else {
+          source += '[^/]*'
+        }
+      } else if (character === '?') {
+        source += '[^/]'
+      } else {
+        source += character.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+      }
+    }
+    return new RegExp(`^${source}$`, 'u')
+  }
+  let matched = false
+  for (const raw of patterns) {
+    const negated = raw.startsWith('!')
+    const pattern = negated ? raw.slice(1) : raw
+    if (compiled(pattern).test(memberPath)) matched = !negated
+  }
+  return matched
 }
 
 /**
@@ -1568,6 +1641,8 @@ export function apply(ctx, rawConfig) {
         properties: {
           bunVersion: { type: 'string' },
           referenceUrl: { type: 'string' },
+          runtimeVersion: { type: 'string' },
+          warning: { type: 'string' },
           total: { type: 'integer' },
           returned: { type: 'integer' },
           categories: {
@@ -1616,6 +1691,25 @@ export function apply(ctx, rawConfig) {
       for (const entry of catalog.apis) counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1)
       const categories = catalog.categories.map((entry) => ({ ...entry, count: counts.get(entry.id) ?? 0 }))
 
+      // The digest is pinned to one Bun release; warn instead of returning
+      // stale signatures with full confidence after a runtime upgrade.
+      let runtimeVersion
+      let warning
+      if (ctx.get('subprocess') !== undefined) {
+        try {
+          const cwd = await sessionCwd(ctx, exec)
+          const runtime = await readRuntimeVersion(ctx, exec, config, cwd)
+          if (typeof runtime.version === 'string') {
+            runtimeVersion = runtime.version
+            if (catalog.bunVersion !== undefined && runtimeVersion !== catalog.bunVersion) {
+              warning = `The bundled catalog is pinned to Bun ${catalog.bunVersion} but this workspace runs Bun ${runtimeVersion}; signatures may be stale. Run bun_doctor, or regenerate data/bun-globals.json after the upgrade.`
+            }
+          }
+        } catch {
+          // The runtime probe is optional for a catalog lookup.
+        }
+      }
+
       let entries
       if (requestedName.length > 0) {
         const exact = catalog.apis.find((entry) => String(entry.name).toLowerCase() === requestedName.toLowerCase())
@@ -1629,6 +1723,8 @@ export function apply(ctx, rawConfig) {
       return lossless({
         ...(catalog.bunVersion === undefined ? {} : { bunVersion: catalog.bunVersion }),
         ...(catalog.referenceUrl === undefined ? {} : { referenceUrl: catalog.referenceUrl }),
+        ...(runtimeVersion === undefined ? {} : { runtimeVersion }),
+        ...(warning === undefined ? {} : { warning }),
         total: catalog.apis.length,
         returned: entries.length,
         categories,
@@ -1933,6 +2029,7 @@ export {
   findWorkspaceRoot,
   inspectProject,
   loadCatalog,
+  matchesWorkspacePatterns,
   rankApis,
   readBunfigLinker,
   readWorkspaceDependencies,

@@ -11,8 +11,9 @@ system-prompt section:
 |---|---|---|
 | `bun_project` | read-only | Classifies a directory (`bun-native` / `bun-capable` / `none`) with a `confidence` and an ordered `signals` list, and reports its lockfile (`bun.lock` text or legacy `bun.lockb`, plus any foreign lockfiles), `bunfig.toml` sections, `package.json` scripts and dependency counts, workspaces, TypeScript setup, `node_modules`/isolated-store state, and the installed Bun version. |
 | `bun_api` | read-only | Answers from a bundled offline digest of the Bun globals (`Bun.serve`, `Bun.file`, `Bun.$`, `bun:sqlite`, `Bun.spawn`, hashing, compression, parsers, …) with signatures, examples and doc links — no network round-trip. |
-| `bun_exec` | runs a process | Runs `bun run <script|file>`, `bun test`, `bun install` (with optional `filter`), `bun add`, `bun ci`, `bun lint`, `bun pm <utility>` or `bun --eval <code>` inside the session's sandbox policy, capped by a timeout, reporting stdout/stderr and the exit status. |
+| `bun_exec` | runs a process | Runs a package.json script or file (`bun run`), `bun test`, `bun install` (with optional `filter`), `bun add`, `bun ci`, `bun lint`, `bun pm <utility>` or `bun --eval <code>` inside the session's sandbox policy, capped by a timeout, reporting stdout/stderr and the exit status. |
 | `bun_doctor` | read-only | Runs a health report: a probe inside the project's Bun (version, platform, native APIs), project checks (classification, lockfile, workspace, linker, package manifest), catalog agreement (curated names resolve on this runtime plus coverage), and optionally the project's `bun:test` suite. |
+| `bun_api` | read-only | Answers from the curated offline digest of Bun globals (70 entries over the runtime's 117 name-level `Bun` globals on 1.4.4; the rest are listed by `validate-catalog`), with signatures, examples and doc links — no network round-trip. |
 
 The dashboard endpoint (`/api/bun-native/status`, owner-only) returns a cheap
 doctor snapshot for a UI page without running tests.
@@ -77,18 +78,27 @@ project under the session's workspace.
 ## Tests
 
 ```sh
-bun run test        # bun test ./test — 16 tests
-bun run smoke       # tools/smoke.mjs — stub-context harness for apply() and all tools
-bun run catalog     # tools/validate-catalog.mjs — catalog against the running Bun
+bun run test         # bun test ./test — 21 tests
+bun run smoke        # tools/smoke.mjs — stub-context harness for apply() and all tools
+bun run catalog      # tools/validate-catalog.mjs — catalog against the running Bun
+bun run verify:claims # tools/verify-claims.mjs — re-settle the README's Bun CLI claims
 ```
 
 `test/plugin.test.ts` covers configuration parsing, the `workspace:`/`bunfig`/
 lockfile helpers, `rankApis`, the catalog (version match, unique names, every
 `Bun.*` entry exists on the runtime, every example transpiles, the verified
 `Bun.ModuleGraph` surface), project classification for the demo and the
-workspace member, `bun_doctor` reports (passing probe, missing native
-properties, failing `bun:test`), the dashboard snapshot's project discovery, and
-registration of the four tools + prompt section + status route.
+workspace member, detection confidence rules (mixed lockfiles, unmatched
+workspace globs, the ancestor cap), `bun_doctor` reports (passing probe, missing
+native properties, failing `bun:test`), the dashboard snapshot's project
+discovery, the catalog-version drift warning, and registration of the four tools
++ prompt section + status route.
+
+`tools/verify-claims.mjs` runs the disputed Bun CLI forms against the installed
+Bun in a throwaway workspace copy and fails when the prose no longer matches:
+`--filter` forms and their exact errors, `bun add --cwd`, the `bun pm hash`
+family, and `bun pm bin`. Its output is also the source for the claims section
+below.
 
 ## Automation
 
@@ -134,10 +144,31 @@ The bundle has no package dependencies, so there is nothing to install before
   the confined argv, so a model-driven Bun process has the same file effects as
   any other command. `danger-full-access` sessions skip confinement, matching
   the host's own shell tools.
-- **Bounded output.** Each stream is collected with a byte cap plus a spill
-  file, then trimmed to `maxOutputChars`; truncation is reported in the result.
+- **Bounded output.** Each stream is collected with a byte cap and a provider
+  spill file, then trimmed to `maxOutputChars`; truncation is reported. The
+  result's `spillPath` (when present) names the complete stream the subprocess
+  provider wrote — the plugin neither chooses that directory nor deletes the
+  file; retention belongs to the Host's spill policy.
 - **Timeouts terminate, they do not fail the call.** The result carries
   `timedOut`, `exitCode` and `signal`; only infrastructure failures throw.
+- **Detection confidence is explicit, not implied.** A `bun.lock`/`bun.lockb`
+  next to another package manager's lockfile adds a `mixed-lockfiles` signal and
+  lowers strong confidence to medium (the repo is not Bun-only, so
+  `promptGuidance` must not forbid npm/yarn outright). A directory counts as a
+  workspace member only when its `memberPath` matches the root's declared globs
+  (`*`, `**`, `?`, leading `!`); otherwise it gets a "not matched" note instead
+  of a false membership. The 8-ancestor cap is also a note ("root not found
+  within 8 ancestors"), never a silent "no lockfile".
+- **The catalog is pinned and says so.** `data/bun-globals.json` carries
+  `bunVersion`; `bun_api` compares it with the workspace runtime (cached
+  `bun --version`) and prepends a warning to every answer when they differ,
+  rather than serving stale signatures with full confidence.
+- **`bun pm` is a pass-through.** Read-only utilities (`ls`, `why`, `bin`,
+  `hash`, `hash-string`, `hash-print`, `licenses`, `outdated`, `whoami`) are the
+  expected agent use; mutating ones (`cache rm`/`prune`, `migrate`, `trust`,
+  `pack`, `pkg set`, `version`) are allowed and run confined like any other
+  `bun_exec` call, so each one is an audited tool call rather than a hidden
+  side effect.
 
 ## Alignment with Bun's workspace management
 
@@ -153,9 +184,11 @@ workspace-targeted operations are `bun install --filter <pattern>` and
   reported as `kind: "bun-native"`, `confidence: "strong"` (root lockfile),
   with a `workspace` record:
   `{ role: "member", root, patterns, memberPath, memberName, rootLockfile, catalog?, catalogs? }`
-  (or `{ role: "root", root, patterns, … }` at the root). The misleading
-  "this Bun project has no lockfile" note is suppressed for members, and the
-  lockfile line names the root lockfile instead.
+  (or `{ role: "root", root, patterns, … }` at the root). A directory is only a
+  member when its `memberPath` matches the declared globs; the walk stops at 8
+  ancestors and reports that cap in `notes` instead of silently reporting "no
+  lockfile". The misleading "this Bun project has no lockfile" note is suppressed
+  for members, and the lockfile line names the root lockfile instead.
 - **Workspace-protocol dependencies** are reported from every dependency group,
   e.g. `Workspace dependencies: greeting workspace:* (dependencies)`. Bun links
   those to the local member, and `bun publish` rewrites `workspace:*` to the
@@ -184,35 +217,42 @@ linker):
 | Check | Result |
 |---|---|
 | `bun_project` at the root | `Workspace: root of patterns packages/*, apps/*`, `bun.lock … lockfileVersion 2`, `node_modules present (isolated store node_modules/.bun)`, `Linker: isolated (from node_modules/.bun)`, recommends `bun ci`, `bun pm ls --all` |
-| `bun_project` at `apps/web` | `bun-native (strong)`, signals `scripts:bun, workspace:member`, `Lockfile: none here — workspace root bun.lock …`, `Workspace: member \`web\` of … (patterns: packages/*, apps/*)`, `Workspace dependencies: greeting workspace:* (dependencies)`, recommends `bun install --filter web` |
-| `bun_exec` `{ mode: "pm", args: ["ls", "--all"] }` | lists `greeting@workspace:packages\greeting`, `web@workspace:apps\web` |
-| `bun_exec` `{ mode: "pm", args: ["hash"] }` | prints the lockfile hash (`B671A1374515D657-…`); `["bin"]` prints `node_modules\.bin` |
+| `bun_project` at `apps/web` | `bun-native (strong)`, signals `scripts:bun, workspace:member`, `Lockfile: none here — workspace root bun.lock …`, `Workspace: member web of … (patterns: packages/*, apps/*)`, `Workspace dependencies: greeting workspace:* (dependencies)`, recommends `bun install --filter web` |
+| `bun_exec` `{ mode: "pm", args: ["ls", "--all"] }` | lists `greeting@workspace:packages/greeting`, `web@workspace:apps/web` |
+| `bun_exec` `{ mode: "pm", args: ["hash"] }` | prints the lockfile hash (`B671A1374515D657-…`); `["bin"]` prints `node_modules/.bin` |
 | `bun_exec` `{ mode: "install", filter: "web" }` | `Done! Checked 3 packages (no changes)` |
 | `bun_exec` `{ mode: "run", target: "test" }` inside `apps/web` | runs the member's `bun:test` suite, 1 pass |
 
 ### Bun 1.4.4 notes the plugin encodes
 
-- `bun --filter <pattern> run build` is **not** valid: the token after the
-  pattern is the *script name*, so Bun answers `Script "run" not found`. The
-  correct form is `bun --filter <pattern> build`; `bun run --filter` is not a
-  flag at all.
-- There is no `bun add --filter`; target a member with `bun add --cwd
-  packages/web <spec>` and keep using `bun install --filter` for installs.
-- The default linker is **isolated** for new workspaces/monorepos and hoisted
-  for new single-package projects (and projects made before v1.3.2). Both were
+Every claim below is re-checked by `bun run verify:claims` (`tools/verify-claims.mjs`)
+against the installed Bun, in a throwaway copy of `examples/bun-workspace`.
+
+- Targeted scripts: **both** `bun --filter <pattern> <script>` and
+  `bun run --filter <pattern> <script>` are real 1.4.4 forms and run the member
+  script (exit 0, tests pass) once the workspace is installed. The invalid form
+  is `bun --filter <pattern> run <script>`: the token after the pattern is the
+  *script name*, so Bun answers `error: Script "run" not found`.
+- Filtered execution needs the workspace installed: with the root's
+  `node_modules`/workspace links absent, both valid forms fail with
+  `error: Failed to start process`; after `bun install` they succeed. The plugin
+  passes the argv through and surfaces Bun's error, so the failure is visible.
+- There is no `bun add --filter`. Target a member with
+  `bun add --cwd <dir> <spec>` (verified: writes into that member's
+  `package.json`). The global form is invalid: `bun --cwd <dir> add …` treats
+  `add` as a script and fails with `error: Script not found "add"`.
+- The default linker is **isolated** for new workspaces/monorepos and hoisted for
+  new single-package projects (and projects made before v1.3.2). Both were
   verified with `[install] linker` in a throwaway copy.
-- `bun pm bin` prints the `node_modules/.bin` folder, not one binary; `bun pm`
-  also has `pkg`, `cache` (`rm`, `prune`), `fetch`, `migrate`, `trust`,
-  `untrusted`, `pack`, `licenses`, `why`, `diff`, `scan`, `hash-string` and
-  `hash-print` — all reachable through `mode: "pm"`.
-- Filtered script execution fails in this sandboxed session with `error: Failed
-  to start process` (also with `--shell system`), while plain `bun run
-  <script>` inside the member works. The plugin still builds the correct argv
-  and surfaces Bun's error instead of hiding it; `bun install --filter` and
-  workspace-only installs do work.
+- `bun pm hash`, `bun pm hash-string`, `bun pm hash-print` and `bun pm bin` all
+  exist on 1.4.4: `hash` prints the lockfile hash, `hash-string` the hashed text
+  with its marker lines, `hash-print` the checksum stored in `bun.lock`, and
+  `bin` the `node_modules/.bin` folder path. `bun pm` also has `pkg`, `cache`
+  (`rm`, `prune`), `fetch`, `migrate`, `trust`, `untrusted`, `pack`, `licenses`,
+  `why`, `diff`, `scan` — all reachable through `mode: "pm"`.
 - `bun install` that needs the global cache (`~/.bun/install/cache`) is denied
-  under `workspace-write` (EPERM) exactly like the host shell; `bun_exec` has no
-  sandbox-escalation parameter.
+  under `workspace-write` (EPERM) exactly like the host shell; workspace-only
+  installs do work. `bun_exec` has no sandbox-escalation parameter.
 
 ### Bun 1.4.4 install and registry notes
 
@@ -330,11 +370,16 @@ validator, and `market/README.md` documents the release procedure and rules.
 
 ## Catalog data
 
-`data/bun-globals.json` is an offline digest of
+`data/bun-globals.json` is a curated offline digest of
 <https://bun.com/reference/globals/bun>, keyed to the installed Bun 1.4.x
-surface. Regenerate it after a Bun upgrade: names are enumerable from the
-runtime (`bun -e "console.log(Object.getOwnPropertyNames(Bun))"`), while
-signatures, summaries and examples come from the reference pages.
-`tools/validate-catalog.mjs` checks every entry against the running runtime
-(name exists, example transpiles, category declared) and prints the globals the
-digest does not curate yet (`bun bun-native/tools/validate-catalog.mjs`).
+surface. It holds **70 entries in 12 categories: 69 name-level `Bun` members
+plus `bun:sqlite Database`**; on Bun 1.4.4 `Object.getOwnPropertyNames(Bun)`
+reports 117 names, so **48 are not curated yet** and `tools/validate-catalog.mjs`
+lists them (and can fail the check if a curated name disappears). Regenerate it
+after a Bun upgrade: names are enumerable from the runtime
+(`bun -e "console.log(Object.getOwnPropertyNames(Bun))"`), while signatures,
+summaries and examples come from the reference pages. The digest is not a
+complete API reference: members and methods inside a curated namespace are not
+individually enumerated, and `bun_api` warns when the runtime version differs
+from `data/bun-globals.json`'s `bunVersion` (`tools/validate-catalog.mjs` catches
+the same drift).

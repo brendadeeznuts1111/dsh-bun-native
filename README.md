@@ -18,7 +18,7 @@ market/       the format-1 plugin market index + its build/validate tooling
 | Tool | Kind | Behaviour |
 |---|---|---|
 | `bun_project` | read-only | Classifies a directory (`bun-native` / `bun-capable` / `none`) with confidence and ordered signals; reports lockfile kind and version, `bunfig.toml` sections, scripts, workspace root/member relationship, `workspace:` protocol dependencies, linker strategy, and the live Bun version. |
-| `bun_api` | read-only | Offline digest of the Bun global API surface (70 APIs, 12 categories) keyed to Bun 1.4.4, with signatures, examples and docs links — no network round-trip. |
+| `bun_api` | read-only | Curated offline digest of the Bun global API surface (70 entries: 69 name-level `Bun` members + `bun:sqlite Database`; 48 of 1.4.4's 117 name-level globals not curated yet) with signatures, examples and docs links — no network round-trip; warns when the runtime differs from the digest pin. |
 | `bun_exec` | runs a process | `bun run`, `bun test`, `bun install` (with `--filter`), `bun add`, `bun ci`, `bun pm`, and `bun --eval`, inside the session sandbox with bounded output and timeout termination. |
 | `bun_doctor` | read-only | Runtime probe, project health, catalog agreement and optionally the project's `bun:test` suite; returns a pass/warn/fail report instead of throwing. |
 
@@ -98,6 +98,7 @@ pinning, and the two-phase release procedure.
 - `bun-native/tools/smoke.mjs` — exercises `apply()`, all four tools, the prompt section (including the Bun docs MCP pointer) and the doctor report against a stub Cordis context.
 - `bun-native/test/plugin.test.ts` — `bun test ./test`: 16 Bun-native property and behaviour tests (catalog names exist on the runtime, examples transpile, workspace classification, doctor pass/fail reports, dashboard discovery, registration of tools/prompt/route).
 - `bun-native/tools/validate-catalog.mjs` — checks every catalog entry against the running Bun and reports the globals not curated yet.
+- `bun-native/tools/verify-claims.mjs` — re-settles the README's Bun CLI claims (`--filter` forms, `bun add --cwd`, the `bun pm hash` family) against the installed Bun and fails when the prose drifts.
 - `bun-docs-mcp` — a live `initialize` + `search_bun` call against <https://bun.com/docs/mcp> returns bun.com results; the server advertises the four tools and `bun://skill`.
 
 ## Licence

@@ -8,7 +8,8 @@
  */
 
 import { afterAll, describe, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as plugin from '../index.js'
@@ -53,7 +54,7 @@ const fsService = {
  * Fake subprocess service: answers `bun --version`, the properties probe and
  * `bun test` from canned output so the Host tools run without spawning Bun.
  */
-function makeSubprocess({ probe = {}, testResult = { exitCode: 0, stdout: '1 pass\n', stderr: '' } } = {}) {
+function makeSubprocess({ probe = {}, testResult = { exitCode: 0, stdout: '1 pass\n', stderr: '' }, version = '1.4.4' } = {}) {
   const calls = []
   return {
     calls,
@@ -67,7 +68,7 @@ function makeSubprocess({ probe = {}, testResult = { exitCode: 0, stdout: '1 pas
       let stderr = ''
       let exitCode = 0
       if (argv.includes('--print') || argv.includes('--version')) {
-        stdout = '1.4.4\n'
+        stdout = `${version}\n`
       } else if (argv.includes('--eval')) {
         stdout = `__BUN_NATIVE_PROBE__${JSON.stringify({
           version: '1.4.4',
@@ -168,6 +169,67 @@ describe('configuration and helpers', () => {
     expect(plugin.rankApis(apis, 'bun.serv', undefined).map((entry) => entry.name)).toEqual(['Bun.serve', 'Bun.serverTime'])
     expect(plugin.rankApis(apis, 'serve', undefined)[0].name).toBe('Bun.serve')
     expect(plugin.rankApis(apis, 'file', 'files').map((entry) => entry.name)).toEqual(['Bun.file'])
+  })
+})
+
+describe('detection confidence rules', () => {
+  test('workspace glob patterns match members and reject non-members', () => {
+    expect(plugin.matchesWorkspacePatterns('apps/web', ['packages/*', 'apps/*'])).toBe(true)
+    expect(plugin.matchesWorkspacePatterns('nested/thing', ['packages/*'])).toBe(false)
+    expect(plugin.matchesWorkspacePatterns('packages/deep/lib', ['packages/**'])).toBe(true)
+    expect(plugin.matchesWorkspacePatterns('packages/legacy', ['packages/*', '!packages/legacy'])).toBe(false)
+  })
+
+  test('a foreign lockfile next to bun.lock lowers confidence and is signalled', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'bun-native-mixed-'))
+    try {
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'mixed', scripts: { start: 'bun src/index.ts' } }))
+      writeFileSync(join(root, 'bun.lock'), JSON.stringify({ lockfileVersion: 2, configVersion: 1, workspaces: {}, packages: {} }))
+      writeFileSync(join(root, 'package-lock.json'), '{}')
+      const { ctx } = makeContext({ fs: fsService })
+      const project = await plugin.inspectProject(ctx, makeExec(), root, config, async () => ({ version: '1.4.4' }))
+      expect(project.kind).toBe('bun-native')
+      expect(project.confidence).toBe('medium')
+      expect(project.signals).toContain('mixed-lockfiles')
+      expect(project.notes.join('\n')).toContain('Mixed package-manager repo')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('a directory not matched by the workspace globs is not reported as a member', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'bun-native-glob-'))
+    try {
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'root', workspaces: ['packages/*'] }))
+      writeFileSync(join(root, 'bun.lock'), JSON.stringify({ lockfileVersion: 2, configVersion: 1, workspaces: {}, packages: {} }))
+      mkdirSync(join(root, 'apps', 'web'), { recursive: true })
+      writeFileSync(join(root, 'apps', 'web', 'package.json'), JSON.stringify({ name: 'web' }))
+      const { ctx } = makeContext({ fs: fsService })
+      const project = await plugin.inspectProject(ctx, makeExec(), join(root, 'apps', 'web'), config, async () => ({ version: '1.4.4' }))
+      expect(project.workspace).toBeNull()
+      expect(project.notes.join('\n')).toContain('not matched by those globs')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('the ancestor search cap is reported instead of silently missing a root', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'bun-native-cap-'))
+    try {
+      const shallow = join(base, 'project')
+      mkdirSync(shallow, { recursive: true })
+      writeFileSync(join(shallow, 'package.json'), JSON.stringify({ name: 'shallow' }))
+      let deep = shallow
+      for (let index = 0; index < 7; index += 1) {
+        deep = join(deep, `level${index}`)
+        mkdirSync(deep, { recursive: true })
+      }
+      const { ctx } = makeContext({ fs: fsService })
+      const project = await plugin.inspectProject(ctx, makeExec(), deep, config, async () => ({ version: '1.4.4' }))
+      expect(project.notes.join('\n')).toContain('Workspace root not found within 8 ancestor directories')
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
   })
 })
 
@@ -283,6 +345,18 @@ describe('bun_doctor and dashboard data', () => {
     expect(snapshot.project.kind).toBe('bun-native')
     expect(snapshot.catalog.total).toBeGreaterThanOrEqual(70)
     expect(snapshot.summary.fail).toBe(0)
+  })
+})
+
+describe('catalog version drift', () => {
+  test('bun_api warns when the runtime differs from the catalog pin', async () => {
+    const subprocess = makeSubprocess({ version: '1.3.0' })
+    const { ctx, tools } = makeContext({ fs: fsService, subprocess, workingDirectory: { defaultDirectory: pluginDir } })
+    plugin.apply(ctx, { bunPath: 'bun-version-drift' })
+    const value = await tools.get('bun_api').execute({ name: 'Bun.serve' }, makeExec())
+    expect(value.runtimeVersion).toBe('1.3.0')
+    expect(value.warning).toContain('pinned to Bun 1.4.4')
+    expect(tools.get('bun_api').output.render({}, value)[0].text).toContain('⚠')
   })
 })
 
