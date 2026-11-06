@@ -49,15 +49,8 @@ the Host; until then the linked workspace versions are what run.
 ## Rebuild after a release
 
 Publishing a new version means a new commit that contains both bundles, then a
-commit that contains the regenerated index. The release script handles both
-phases (and works for an existing repository, not just the first publish):
-
-```powershell
-pwsh scratch/publish-market.ps1 -Phase bundle   # commit bun-native/ + bun-docs-mcp/ + README
-pwsh scratch/publish-market.ps1 -Phase market   # build, validate, upload the index
-```
-
-Manual equivalent:
+commit that contains the regenerated index. The maintainer's local release tool
+automates both; the equivalent manual steps are:
 
 ```sh
 bun market/build-index.mjs --commit <40-hex-sha-of-the-bundle-commit>
