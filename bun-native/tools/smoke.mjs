@@ -295,6 +295,7 @@ subprocess.enqueue({
     arch: 'x64',
     features: { serve: 'function', file: 'function', write: 'function', spawn: 'function', shell: 'function', glob: 'function', hashing: 'function', password: 'function', transpiler: 'function', build: 'function', moduleGraph: 'function', sqlite: 'module' },
     catalog: { checked: 70, missing: [], uncoveredCount: 48, uncovered: ['Cookie'] },
+    nodeUrl: { required: true, missing: [], urlSameAsGlobal: true },
   })}\n`,
   exitCode: 0,
 })
@@ -305,6 +306,7 @@ assert.equal(doctor.summary.fail, 0)
 assert.ok(doctor.summary.pass >= 5)
 assert.ok(doctor.summary.warn >= 1)
 assert.ok(doctor.checks.some((check) => check.id === 'runtime.features' && check.status === 'pass'))
+assert.ok(doctor.checks.some((check) => check.id === 'runtime.node-url' && check.status === 'pass'))
 assert.ok(doctor.checks.some((check) => check.id === 'catalog.entries' && check.status === 'pass'))
 assert.equal(doctor.tests, null)
 assert.match(tools.get('bun_doctor').output.render({}, doctor)[0].text, /Summary: \d+ pass, \d+ warn, 0 fail/)

@@ -82,6 +82,7 @@ function makeSubprocess({ probe = {}, testResult = { exitCode: 0, stdout: '1 pas
             ...probe,
           },
           catalog: { checked: 69, missing: [], uncoveredCount: 48, uncovered: ['Cookie'] },
+          nodeUrl: { required: true, missing: [], urlSameAsGlobal: true },
         })}\n`
       } else if (argv.includes('test')) {
         stdout = testResult.stdout
@@ -314,6 +315,7 @@ describe('bun_doctor and dashboard data', () => {
     expect(report.summary.fail).toBe(0)
     expect(report.runtime.version).toBe('1.4.4')
     expect(report.checks.find((check) => check.id === 'runtime.features').status).toBe('pass')
+    expect(report.checks.find((check) => check.id === 'runtime.node-url').status).toBe('pass')
     expect(report.checks.find((check) => check.id === 'catalog.entries').status).toBe('pass')
     expect(report.tests).toBeNull()
   })

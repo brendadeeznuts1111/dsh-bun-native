@@ -220,6 +220,150 @@ try {
     exampleRun.exit === 0 && /http:\/\//u.test(exampleRun.stdout),
   )
 
+  // --- node:url compatibility claims (Bun docs: "Fully implemented") -------
+  // One separate check per property domain, so a regression names its domain.
+  const urlModule = await import('node:url')
+  const documentedUrlExports = ['URL', 'URLPattern', 'URLSearchParams', 'Url', 'domainToASCII', 'domainToUnicode', 'fileURLToPath', 'fileURLToPathBuffer', 'format', 'parse', 'pathToFileURL', 'resolve', 'resolveObject', 'urlToHttpOptions']
+  const bunUrlExports = Object.keys(urlModule).filter((name) => name !== 'default').sort()
+  check(
+    'node:url surface — documented exports are present',
+    `exports match ${documentedUrlExports.join(', ')}`,
+    { cmd: '(import node:url)', exit: 0, stdout: bunUrlExports.join(','), stderr: '' },
+    JSON.stringify(bunUrlExports) === JSON.stringify([...documentedUrlExports].sort()),
+  )
+
+  const nodeProbe = Bun.spawnSync({
+    cmd: ['node', '-e', "console.log(Object.keys(require('node:url')).sort().join(','))"],
+    stdout: 'pipe',
+    stderr: 'pipe',
+    timeout: 20_000,
+    env: { ...process.env },
+  })
+  const nodeUrlExports = nodeProbe.exitCode === 0 ? nodeProbe.stdout.toString().trim().split(',').sort() : undefined
+  check(
+    'node:url surface — matches the installed Node.js',
+    'when node is available, Bun and Node expose the same url exports',
+    { cmd: 'node -e <url exports>', exit: nodeProbe.exitCode ?? 1, stdout: nodeUrlExports === undefined ? '(node unavailable; skipped)' : nodeUrlExports.join(','), stderr: nodeProbe.stderr?.toString().trim() ?? '' },
+    nodeUrlExports === undefined || JSON.stringify(bunUrlExports) === JSON.stringify(nodeUrlExports),
+  )
+
+  check(
+    'node:url URL property — URL and URLSearchParams are the globals',
+    'url.URL === URL and url.URLSearchParams === URLSearchParams',
+    { cmd: '(in-process node:url)', exit: 0, stdout: `${urlModule.URL === URL} ${urlModule.URLSearchParams === URLSearchParams}`, stderr: '' },
+    urlModule.URL === URL && urlModule.URLSearchParams === URLSearchParams,
+  )
+
+  const urlSample = 'https://user:pass@example.com:8443/p/a?q=1&r=2#frag'
+  const parsedSample = new urlModule.URL(urlSample)
+  const urlChecks = [
+    ['protocol', parsedSample.protocol === 'https:', parsedSample.protocol],
+    ['hostname', parsedSample.hostname === 'example.com', parsedSample.hostname],
+    ['port', parsedSample.port === '8443', parsedSample.port],
+    ['pathname', parsedSample.pathname === '/p/a', parsedSample.pathname],
+    ['search', parsedSample.search === '?q=1&r=2', parsedSample.search],
+    ['hash', parsedSample.hash === '#frag', parsedSample.hash],
+    ['origin', parsedSample.origin === 'https://example.com:8443', parsedSample.origin],
+  ]
+  for (const [property, passed, detail] of urlChecks) {
+    check(`node:url URL property — ${property}`, `WHATWG URL ${property} is correct`, { cmd: '(in-process node:url)', exit: passed ? 0 : 1, stdout: detail, stderr: '' }, passed)
+  }
+
+  const searchParams = new urlModule.URLSearchParams('a=1&b=2&a=3')
+  check(
+    'node:url URLSearchParams property — size and duplicates',
+    'size 3 with getAll("a") === ["1","3"]',
+    { cmd: '(in-process node:url)', exit: 0, stdout: `${searchParams.size} ${JSON.stringify(searchParams.getAll('a'))}`, stderr: '' },
+    searchParams.size === 3 && JSON.stringify(searchParams.getAll('a')) === JSON.stringify(['1', '3']),
+  )
+  const sortedParams = new urlModule.URLSearchParams('a=1&b=2&a=3')
+  sortedParams.sort()
+  check(
+    'node:url URLSearchParams property — sort and serialization',
+    'sorted form serializes as a=1&a=3&b=2',
+    { cmd: '(in-process node:url)', exit: 0, stdout: String(sortedParams), stderr: '' },
+    String(sortedParams) === 'a=1&a=3&b=2',
+  )
+
+  const legacyParsed = urlModule.parse(urlSample)
+  const parseChecks = [
+    ['protocol', legacyParsed.protocol === 'https:', legacyParsed.protocol],
+    ['auth', legacyParsed.auth === 'user:pass', String(legacyParsed.auth)],
+    ['host', legacyParsed.host === 'example.com:8443', legacyParsed.host],
+    ['port', legacyParsed.port === '8443', String(legacyParsed.port)],
+    ['path', legacyParsed.path === '/p/a?q=1&r=2', legacyParsed.path],
+    ['href', legacyParsed.href === urlSample, legacyParsed.href],
+  ]
+  for (const [property, passed, detail] of parseChecks) {
+    check(`node:url legacy parse property — ${property}`, `url.parse() ${property} is correct`, { cmd: '(in-process node:url)', exit: passed ? 0 : 1, stdout: detail, stderr: '' }, passed)
+  }
+  check(
+    'node:url legacy format property — round-trip',
+    'url.format(url.parse(url)) === url',
+    { cmd: '(in-process node:url)', exit: 0, stdout: urlModule.format(legacyParsed), stderr: '' },
+    urlModule.format(legacyParsed) === urlSample,
+  )
+  check(
+    'node:url legacy resolve property — dot segments',
+    'resolve("http://a/b/c", "../d") === "http://a/d"',
+    { cmd: '(in-process node:url)', exit: 0, stdout: urlModule.resolve('http://a/b/c', '../d'), stderr: '' },
+    urlModule.resolve('http://a/b/c', '../d') === 'http://a/d',
+  )
+
+  const windowsPath = 'C:\\Users\\bobby\\a b.txt'
+  const fileUrl = urlModule.pathToFileURL(windowsPath)
+  check(
+    'node:url file URL property — encoding and round-trip',
+    'file:///C:/Users/bobby/a%20b.txt round-trips to the Windows path',
+    { cmd: '(in-process node:url)', exit: 0, stdout: `${fileUrl.href} -> ${urlModule.fileURLToPath(fileUrl)}`, stderr: '' },
+    fileUrl.href === 'file:///C:/Users/bobby/a%20b.txt' && urlModule.fileURLToPath(fileUrl) === windowsPath,
+  )
+  check(
+    'node:url file URL property — fileURLToPathBuffer',
+    'buffer contains the path bytes',
+    { cmd: '(in-process node:url)', exit: 0, stdout: Buffer.isBuffer(urlModule.fileURLToPathBuffer(fileUrl)).toString(), stderr: '' },
+    Buffer.isBuffer(urlModule.fileURLToPathBuffer(fileUrl)) && urlModule.fileURLToPathBuffer(fileUrl).toString() === windowsPath,
+  )
+  check(
+    'node:url file URL property — rejects non-file schemes',
+    'fileURLToPath("https://…") throws',
+    (() => {
+      try {
+        urlModule.fileURLToPath('https://example.com/x')
+        return { cmd: '(in-process node:url)', exit: 0, stdout: 'did not throw', stderr: '' }
+      } catch (error) {
+        return { cmd: '(in-process node:url)', exit: 0, stdout: error.message, stderr: '' }
+      }
+    })(),
+    (() => {
+      try {
+        urlModule.fileURLToPath('https://example.com/x')
+        return false
+      } catch {
+        return true
+      }
+    })(),
+  )
+
+  check(
+    'node:url domain property — ASCII/Unicode round-trip',
+    'domainToASCII("mañana.com") === "xn--maana-pta.com" and back',
+    { cmd: '(in-process node:url)', exit: 0, stdout: `${urlModule.domainToASCII('mañana.com')} / ${urlModule.domainToUnicode('xn--maana-pta.com')}`, stderr: '' },
+    urlModule.domainToASCII('mañana.com') === 'xn--maana-pta.com' && urlModule.domainToUnicode('xn--maana-pta.com') === 'mañana.com',
+  )
+
+  const httpOptions = urlModule.urlToHttpOptions(parsedSample)
+  const httpOptionChecks = [
+    ['protocol', httpOptions.protocol === 'https:', httpOptions.protocol],
+    ['hostname', httpOptions.hostname === 'example.com', httpOptions.hostname],
+    ['port is a number', httpOptions.port === 8443 && typeof httpOptions.port === 'number', `${typeof httpOptions.port} ${httpOptions.port}`],
+    ['path', httpOptions.path === '/p/a?q=1&r=2', httpOptions.path],
+    ['auth', httpOptions.auth === 'user:pass', String(httpOptions.auth)],
+  ]
+  for (const [property, passed, detail] of httpOptionChecks) {
+    check(`node:url HTTP-options property — ${property}`, `urlToHttpOptions ${property} is correct`, { cmd: '(in-process node:url)', exit: passed ? 0 : 1, stdout: detail, stderr: '' }, passed)
+  }
+
   // --- runtime, for the coverage wording -----------------------------------
   const probe = run(['--eval', 'console.log(JSON.stringify({ version: Bun.version, globals: Object.getOwnPropertyNames(Bun).length }))'])
   const runtime = JSON.parse(probe.stdout)

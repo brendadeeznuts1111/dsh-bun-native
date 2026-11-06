@@ -12,7 +12,7 @@ system-prompt section:
 | `bun_project` | read-only | Classifies a directory (`bun-native` / `bun-capable` / `none`) with a `confidence` and an ordered `signals` list, and reports its lockfile (`bun.lock` text or legacy `bun.lockb`, plus any foreign lockfiles), `bunfig.toml` sections, `package.json` scripts and dependency counts, workspaces, TypeScript setup, `node_modules`/isolated-store state, and the installed Bun version. |
 | `bun_api` | read-only | Answers from a bundled offline digest of the Bun globals (`Bun.serve`, `Bun.file`, `Bun.$`, `bun:sqlite`, `Bun.spawn`, hashing, compression, parsers, …) with signatures, examples and doc links — no network round-trip. |
 | `bun_exec` | runs a process | Runs a package.json script or file (`bun run`), `bun test`, `bun install` (with optional `filter`), `bun add`, `bun ci`, `bun lint`, `bun pm <utility>` or `bun --eval <code>` inside the session's sandbox policy, capped by a timeout, reporting stdout/stderr and the exit status. |
-| `bun_doctor` | read-only | Runs a health report: a probe inside the project's Bun (version, platform, native APIs), project checks (classification, lockfile, workspace, linker, package manifest), catalog agreement (curated names resolve on this runtime plus coverage), and optionally the project's `bun:test` suite. |
+| `bun_doctor` | read-only | Runs a health report: a probe inside the project's Bun (version, platform, native APIs, `node:url` compatibility), project checks (classification, lockfile, workspace, linker, package manifest), catalog agreement (curated names resolve on this runtime plus coverage), and optionally the project's `bun:test` suite. |
 | `bun_api` | read-only | Answers from the curated offline digest of Bun globals (70 entries over the runtime's 117 name-level `Bun` globals on 1.4.4; the rest are listed by `validate-catalog`), with signatures, examples and doc links — no network round-trip. |
 
 The dashboard endpoint (`/api/bun-native/status`, owner-only) returns a cheap
@@ -52,7 +52,12 @@ both cards from the market index, or install `bun-docs-mcp/` directly.
 Bun 1.4.4 does not ship the built-in linter yet: `bun lint` resolves to a
 package script and reports `error: Script not found "lint"`. Bun's docs describe
 the linter and its 1,000+ rules, so the mode surfaces Bun's own error until the
-runtime supports it; the mode exists now so a future Bun needs no plugin change.
+runtime supports it.
+
+Canary `1.4.4-canary.1+b1305ddc7` does ship it: `--rules -f json` returns 1,048
+rules, `--explain` prints rule docs, and `--fix`, `--format json`, `--doctor`,
+`--init`, `--staged` and type-aware rules were verified end-to-end through this
+mode; see the research notes for the matrix.
 
 ## Dashboard
 
@@ -63,7 +68,7 @@ fetches `GET /api/bun-native/status` and renders four cards:
 | Card | Contents |
 |---|---|
 | Project | classification + confidence, directory, lockfile, linker, workspace root/member, scripts, signals |
-| Bun runtime | version, platform/arch, and the result of the native-properties probe (12 required APIs) |
+| Bun runtime | version, platform/arch, and the result of the native-properties probe (12 required APIs, plus a separate `node:url` compatibility check) |
 | API catalog | API and category counts, coverage bar against the running runtime, catalog/runtime version agreement, link to the Bun globals reference |
 | Health checks | the `bun_doctor` pass/warn/fail checks with their details |
 
@@ -78,10 +83,10 @@ project under the session's workspace.
 ## Tests
 
 ```sh
-bun run test         # bun test ./test — 40 tests in two files
+bun run test         # bun test ./test — 103 tests in three files
 bun run smoke        # tools/smoke.mjs — stub-context harness for apply() and all tools
 bun run catalog      # tools/validate-catalog.mjs — catalog against the running Bun
-bun run verify:claims # tools/verify-claims.mjs — re-settle the README's Bun CLI claims + Bun.serve properties
+bun run verify:claims # tools/verify-claims.mjs — re-settle the README's Bun CLI/serve/node:url claims
 ```
 
 `test/plugin.test.ts` covers configuration parsing, the `workspace:`/`bunfig`/
@@ -104,6 +109,22 @@ discovery, the catalog-version drift warning, and registration of the four tools
 | `hostname properties` | defaults to `localhost`; equals `url.hostname`; explicit `127.0.0.1` bind reflected in both; hostname appears in `url.origin` |
 | `port properties` | `server.port` is an allocated integer 1–65535; `url.port` is its decimal string; origin ends with `:port`; port 70000 is rejected; two ephemeral servers get distinct ports |
 
+`test/node-url-properties.test.ts` covers Bun's **"Fully supported — Fully
+implemented"** claim for [`node:url`](https://bun.com/reference/node/url), again
+one suite per property domain:
+
+| Suite | Properties asserted |
+|---|---|
+| `module surface` | exports exactly the 14 Node-documented members (`URL`, `URLPattern`, `URLSearchParams`, `Url`, `domainToASCII`, `domainToUnicode`, `fileURLToPath`, `fileURLToPathBuffer`, `format`, `parse`, `pathToFileURL`, `resolve`, `resolveObject`, `urlToHttpOptions`); `URL`/`URLSearchParams` are the globals; every documented function is callable |
+| `URL properties` | `protocol`, `hostname`, `port`, `pathname`, `search`, `hash`, `origin`, `username`, `password`, `href` on a WHATWG URL |
+| `URLSearchParams properties` | `size`, `getAll`, `has`, `append`, `set`, `delete`, `sort`, `toString` encoding, `entries`/`keys`/`values`, `forEach` |
+| `legacy parse properties` | `protocol`, `slashes`, `auth`, `host`, `hostname`, `port`, `pathname`, `search`, `query`, `hash`, `path`, `href`, `parseQueryString` object form, invalid input encoded into `pathname` |
+| `legacy format properties` | `format(parse(url))` round-trip; object `protocol`/`hostname`/`port`/`pathname`, object query, `auth`, `hash` |
+| `legacy resolve properties` | last-segment replacement, dot segments, absolute reference wins, `resolveObject` components |
+| `file URL properties` | `pathToFileURL` produces `file:` + encoded spaces; `fileURLToPath` round-trips and decodes; `fileURLToPathBuffer` returns the path bytes; non-file scheme rejects |
+| `domain properties` | `domainToASCII`/`domainToUnicode` round-trip; invalid domains return `""`/unchanged |
+| `URL-to-HTTP-options properties` | `protocol`, `hostname`, numeric `port`, `path`, `auth`, `hash`/`search`, `href` |
+
 `tools/verify-claims.mjs` runs the disputed Bun CLI forms against the installed
 Bun in a throwaway workspace copy and fails when the prose no longer matches:
 `--filter` forms and their exact errors, `bun add --cwd`, the `bun pm hash`
@@ -111,8 +132,11 @@ family, and `bun pm bin`. It repeats the same **four property domains as
 separate labelled checks** (`URL property — …`, `protocol property — …`,
 `hostname property — …`, `port property — …`), plus the server-behaviour checks
 (handler round-trips, `stop()` closes the listener) and the `Bun.serve` example
-from `data/bun-globals.json` executing as written. Its output is also the source
-for the claims section below.
+from `data/bun-globals.json` executing as written. It also checks `node:url` per
+domain against the installed Node.js when that binary is available: export
+surface parity, the WHATWG class identity, URL/URLSearchParams/legacy
+parse/format/resolve/file URL/domain/HTTP-options properties, each as its own
+labelled check. Its output is also the source for the claims section below.
 
 `tools/validate-catalog.mjs --json <path>` writes a machine-readable catalog
 report (`curated`, `uncovered`, `missingOnRuntime`, per-category counts,

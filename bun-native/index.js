@@ -1073,6 +1073,19 @@ console.log(marker + JSON.stringify({
     ffi: probe(() => Bun.FFI),
     image: probe(() => Bun.Image),
   },
+  nodeUrl: (() => {
+    try {
+      const nodeUrl = require('node:url');
+      const required = ['domainToASCII', 'domainToUnicode', 'fileURLToPath', 'fileURLToPathBuffer', 'format', 'parse', 'pathToFileURL', 'resolve', 'resolveObject', 'urlToHttpOptions'];
+      return {
+        required: true,
+        missing: required.filter((name) => typeof nodeUrl[name] !== 'function'),
+        urlSameAsGlobal: nodeUrl.URL === globalThis.URL && nodeUrl.URLSearchParams === globalThis.URLSearchParams,
+      };
+    } catch {
+      return { required: false, missing: [], urlSameAsGlobal: false };
+    }
+  })(),
   catalog: (() => {
     const missing = catalogNames.filter((name) => !(name in Bun));
     const globals = Object.getOwnPropertyNames(Bun);
@@ -1206,6 +1219,23 @@ async function buildDoctorReport(ctx, exec, config, directory, options = {}) {
     const required = ['serve', 'file', 'write', 'spawn', 'shell', 'glob', 'hashing', 'password', 'transpiler', 'build', 'moduleGraph', 'sqlite']
     const missing = required.filter((key) => !probeFeaturePresent(probe.features?.[key]))
     add('runtime.features', 'Bun native properties', missing.length === 0 ? 'pass' : 'fail', missing.length === 0 ? `all ${required.length} probed APIs present` : `missing: ${missing.join(', ')}`)
+    if (probe.nodeUrl !== undefined) {
+      const nodeUrl = probe.nodeUrl
+      const missingNodeUrl = Array.isArray(nodeUrl.missing) ? nodeUrl.missing : []
+      const passed = nodeUrl.required === true && missingNodeUrl.length === 0 && nodeUrl.urlSameAsGlobal === true
+      add(
+        'runtime.node-url',
+        'Node.js compatibility: node:url',
+        passed ? 'pass' : 'fail',
+        nodeUrl.required !== true
+          ? 'require("node:url") failed'
+          : missingNodeUrl.length > 0
+            ? `missing: ${missingNodeUrl.join(', ')}`
+            : nodeUrl.urlSameAsGlobal === true
+              ? '10 documented functions present; URL/URLSearchParams are the globals'
+              : 'URL/URLSearchParams are not the globals',
+      )
+    }
   }
 
   if (probe !== null && wanted.has('catalog')) {
