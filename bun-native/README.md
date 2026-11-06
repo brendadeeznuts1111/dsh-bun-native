@@ -4,13 +4,18 @@ A DeepSeek Harness bundle that teaches the agent to work with **Bun-native
 projects**, built around the global API surface documented at
 <https://bun.com/reference/globals/bun>.
 
-It registers three Host tools and one short system-prompt section:
+It registers four Host tools, a read-only dashboard endpoint and one short
+system-prompt section:
 
 | Tool | Kind | What it does |
 |---|---|---|
 | `bun_project` | read-only | Classifies a directory (`bun-native` / `bun-capable` / `none`) with a `confidence` and an ordered `signals` list, and reports its lockfile (`bun.lock` text or legacy `bun.lockb`, plus any foreign lockfiles), `bunfig.toml` sections, `package.json` scripts and dependency counts, workspaces, TypeScript setup, `node_modules`/isolated-store state, and the installed Bun version. |
 | `bun_api` | read-only | Answers from a bundled offline digest of the Bun globals (`Bun.serve`, `Bun.file`, `Bun.$`, `bun:sqlite`, `Bun.spawn`, hashing, compression, parsers, …) with signatures, examples and doc links — no network round-trip. |
-| `bun_exec` | runs a process | Runs `bun run <script|file>`, `bun test`, `bun install` (with optional `filter` for one workspace member), `bun pm <utility>` (e.g. `ls --all`), or `bun --eval <code>` inside the session's sandbox policy, capped by a timeout, reporting stdout/stderr and the exit status. |
+| `bun_exec` | runs a process | Runs `bun run <script|file>`, `bun test`, `bun install` (with optional `filter`), `bun add`, `bun ci`, `bun pm <utility>` or `bun --eval <code>` inside the session's sandbox policy, capped by a timeout, reporting stdout/stderr and the exit status. |
+| `bun_doctor` | read-only | Runs a health report: a probe inside the project's Bun (version, platform, native APIs), project checks (classification, lockfile, workspace, linker, package manifest), catalog agreement (curated names resolve on this runtime plus coverage), and optionally the project's `bun:test` suite. |
+
+The dashboard endpoint (`/api/bun-native/status`, owner-only) returns a cheap
+doctor snapshot for a UI page without running tests.
 
 Detection follows the verified Bun 1.4 conventions, strongest first: `bun.lock`,
 `bun.lockb`, `bunfig.toml`, `packageManager: bun@…`, a script that invokes
@@ -19,7 +24,20 @@ Detection follows the verified Bun 1.4 conventions, strongest first: `bun.lock`,
 
 The prompt section (`promptGuidance`) tells the agent to use `bun_project`
 before assuming a toolchain, to prefer built-in Bun APIs over new
-dependencies, and not to introduce npm/yarn/pnpm into a Bun-native project.
+dependencies, and not to introduce npm/yarn/pnpm into a Bun-native project. It
+also points at the Bun docs MCP tools when the companion bundle is installed.
+
+## Live Bun docs via MCP
+
+The companion bundle `@local/bun-docs-mcp` connects Bun's official docs MCP
+server at <https://bun.com/docs/mcp> and adds four read-only tools:
+`mcp__bun_docs__search_bun`, `read_bun_page`, `list_bun_pages` and `grep_bun`
+(plus the `bun://skill` resource).
+
+`bun_api` keeps working offline for global API signatures; the MCP server is the
+live source for guides, blog posts and full pages. `bun_api`'s no-match output
+and the prompt section point at the MCP tools when they are present. Install
+both cards from the market index, or install `bun-docs-mcp/` directly.
 
 ## Configuration
 
@@ -131,6 +149,65 @@ linker):
   under `workspace-write` (EPERM) exactly like the host shell; `bun_exec` has no
   sandbox-escalation parameter.
 
+### Bun 1.4.4 install and registry notes
+
+The 1.4.4 release carried a large batch of install and registry fixes. These are
+the ones that change how `bun_exec` installs behave or how the agent should read
+a monorepo's dependency state:
+
+- **`bun outdated` and `bun update -i` fail honestly.** `bun outdated` exits 1
+  with `error: … downloading package manifest …` when a manifest cannot be
+  fetched (it used to print an empty table and exit 0), and `bun update -i`
+  refuses to start without a TTY, pointing at `bun update` / `bun outdated`
+  instead of hanging.
+- **Registry credentials are sent again.** A registry URL with embedded
+  credentials is sent as an `Authorization` header, whether it came from
+  `--registry`, `BUN_CONFIG_REGISTRY`, `npm_config_registry`, or bunfig
+  `[install] registry = { url = … }`; 1.3 had dropped them.
+- **`.npmrc` parsing improved.** Quoted values expand environment variables
+  (`registry = "${NPM_REGISTRY}"`), `${VAR?}` is the optional form, the `email`
+  field is read for registries that require it, and `$HOME/.npmrc` is read when
+  `XDG_CONFIG_HOME` is set but holds no `.npmrc`.
+- **Frozen installs respect scoped registries** from bunfig when the lockfile
+  entry has an empty registry URL.
+- **Git installs are atomic and deduplicated.** A git dependency is cloned into
+  a staging directory and moved into the cache only when the clone completes;
+  the same repository via different protocols resolves correctly, GitHub
+  custom-protocol URLs take the tarball path, and cold-cache installs cover
+  every branch. `bun patch` now handles git and tarball dependencies.
+- **Lockfiles stay text and stay smaller.** npm/yarn/pnpm migration writes
+  `bun.lock` even when it fails partway, and packages reachable only through an
+  optional peer's resolution slot are dropped.
+- **Optional peers resolve to an installed copy** when one exists, removing
+  duplicates under `node_modules/.bun` in monorepos.
+- **Packing follows npm.** `bun pm pack` always includes `bin`/`directories.bin`
+  files even when `files` excludes them; `bun pm pack` and `bun publish` re-read
+  `package.json` after `prepublishOnly`/`prepack`/`prepare`, so lifecycle version
+  bumps land in the tarball name and registry metadata.
+- **Fewer crashes.** Rare crashes in `bun install`, `bun add`, `bun pm ls`,
+  `bun pm patch`, and `bun update --interactive` are fixed, including registry
+  request retries, `.npmrc` CA handling, local tarball resolution, git specifier
+  parsing, package names, and lifecycle script filtering.
+- **Smaller CLI fixes.** `bunx @scope/name` resolves the scoped package;
+  `bun init` falls back to `-y` when stdin is not a TTY; `bun install` falls
+  back to copying when a cache hardlink fails with `EACCES`/`EPERM`;
+  `BUN_DISABLE_SLOW_FILESYSTEM_WARNING=1` silences the slow-filesystem notice;
+  the isolated linker fails fast on bad integrity or error-tarball responses and
+  gives a self-dependency its self-link. Long version labels (a tarball or
+  `file:` spec, or a workspace's own version) work in the hoisted linker and
+  with `bun patch`/`patchedDependencies`.
+
+Verified locally on 1.4.4 (Windows, workspace sandbox; fixtures in
+`scratch/verify-144/`): `bun outdated` against an unreachable registry exited 1
+with `error: ConnectionRefused downloading package manifest is-odd`; a project
+`.npmrc` with `registry="${PROBE_REGISTRY}"` used the environment-provided
+registry; a local registry received `Authorization: Basic …` from a URL with
+`user:pass@`; `bun pm pack` included `bin/cli.js` despite `files: ["index.js"]`;
+a `prepack` version bump produced `pack-prepack-probe-1.0.1.tgz`; without a
+TTY, `bun update -i` exited 1 and `bun init` created the project. The
+remaining claims above come from the 1.4.4 release notes and were not
+independently re-run here.
+
 ## Verifying it
 
 All four checks below were run in the desktop profile with the bundle installed
@@ -145,7 +222,7 @@ and active, not just against stubs:
    `bun:test` suite runs (2 pass) with exit code 0; `bun_exec` `{ mode: "test" }`
    runs `bun test` directly.
 3. `bun_api` `{ name: "Bun.serve" }` → signature, summary and a runnable
-   example; `bun_api` with no arguments lists the 12 categories covering 69
+   example; `bun_api` with no arguments lists the 12 categories covering 70
    APIs; `{ query: "sqlite" }` returns `bun:sqlite Database` and `Bun.SQL`.
 4. `bun_exec` `{ mode: "eval", code: "…" }` → prints `Bun 1.4.4` through the
    sandbox; `{ mode: "run", target: "start", timeoutMs: 3000 }` against the
@@ -171,19 +248,20 @@ with `bun add -d @types/bun` before running `bun check` in it. Note that in Bun
 
 ## Plugin market index
 
-The repository publishes this bundle through a **format‑1 DSH plugin market
-index** in `market/` (a sibling of this package, not part of the installed
-bundle):
+The repository publishes this bundle **and the companion `@local/bun-docs-mcp`
+bundle** through a **format‑1 DSH plugin market index** in `market/` (a sibling
+of this package, not part of the installed bundle):
 
 - index URL:
   `https://raw.githubusercontent.com/brendadeeznuts1111/dsh-bun-native/main/market/index.json`
 - register it in **Plugins → Discover → Add index source** (enable
-  **Custom plugin indexes** first), then install the `Bun native` card.
+  **Custom plugin indexes** first), then install the `Bun native` and
+  `Bun docs MCP` cards.
 
-The index pins the install source to a Git commit
-(`git+https://github.com/brendadeeznuts1111/dsh-bun-native.git#<commit>&path:/bun-native`)
-and declares `engines.dsh` from this manifest. `market/build-index.mjs`
-regenerates it, `market/validate-index.mjs` is a port of DSH's own format‑1
+Each card pins its install source to the same Git commit
+(`git+…#<commit>&path:/bun-native` and `…&path:/bun-docs-mcp`) and declares
+`engines.dsh` from its manifest. `market/build-index.mjs` regenerates the
+two-plugin index, `market/validate-index.mjs` is a port of DSH's own format‑1
 validator, and `market/README.md` documents the release procedure and rules.
 
 ## Catalog data
@@ -193,3 +271,6 @@ validator, and `market/README.md` documents the release procedure and rules.
 surface. Regenerate it after a Bun upgrade: names are enumerable from the
 runtime (`bun -e "console.log(Object.getOwnPropertyNames(Bun))"`), while
 signatures, summaries and examples come from the reference pages.
+`tools/validate-catalog.mjs` checks every entry against the running runtime
+(name exists, example transpiles, category declared) and prints the globals the
+digest does not curate yet (`bun bun-native/tools/validate-catalog.mjs`).

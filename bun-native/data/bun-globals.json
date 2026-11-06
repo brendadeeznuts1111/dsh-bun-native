@@ -308,6 +308,16 @@
       "example": "console.log(\"standalone:\", Bun.isStandaloneExecutable);\nconsole.log(\"embedded files:\", Bun.embeddedFiles.length);"
     },
     {
+      "name": "Bun.ModuleGraph",
+      "category": "runtime",
+      "kind": "class",
+      "summary": "Experimental isolated module graph: loads a module into the current process again with its own module instances, require.cache, injected globals and a timers/I/O context, while sharing parsed and JIT-compiled code. dispose() closes everything the graph opened and makes further import() and run() fail; it separates instances of an app you trust and is not a security sandbox.",
+      "signature": "class Bun.ModuleGraph {\n  constructor(options?: { globals?: Record<string, unknown>; onError?: (error: unknown, kind: \"uncaughtException\" | \"unhandledRejection\") => void });\n  static readonly current: Bun.ModuleGraph | undefined;\n  import<T = unknown>(specifier: string): Promise<T>;\n  run<T>(callback: () => T): T;\n  dispose(): void;\n}",
+      "docsUrl": "https://bun.com/docs/runtime/module-graph",
+      "runtime": "any",
+      "example": "const tenantProcess = Object.create(process, { env: { value: { TENANT: \"a\" }, enumerable: true } });\nconst graph = new Bun.ModuleGraph({\n  globals: { process: tenantProcess },\n  onError: (error, kind) => console.error(kind, error),\n});\nconst app = await graph.import(\"./app.ts\");\nconsole.log(await graph.run(() => app.handle()));\ngraph.dispose();"
+    },
+    {
       "name": "Bun.$",
       "category": "shell",
       "kind": "function",
@@ -671,11 +681,11 @@
       "name": "Bun.Transpiler",
       "category": "tooling",
       "kind": "class",
-      "summary": "Transpiles TypeScript, JSX and modern JavaScript to current JavaScript in memory without bundling or resolving imports.",
-      "signature": "class Bun.Transpiler { constructor(options?: Bun.TranspilerOptions); transformSync(code: Bun.StringOrBuffer, loader?: Bun.Loader): string; transform(code: Bun.StringOrBuffer, loader?: Bun.Loader): Promise<string> }",
-      "docsUrl": "https://bun.com/docs/runtime/transpiler",
+      "summary": "Transpiles TypeScript, JSX and modern JavaScript to current JavaScript in memory without bundling or resolving imports. `scan()` returns the module's exports and imports with metadata, and `scanImports()` is the faster imports-only variant; type-only imports and exports are ignored.",
+      "signature": "class Bun.Transpiler { constructor(options?: Bun.TranspilerOptions); transformSync(code: Bun.StringOrBuffer, loader?: Bun.Loader): string; transform(code: Bun.StringOrBuffer, loader?: Bun.Loader): Promise<string>; scan(code: Bun.StringOrBuffer): { exports: string[]; imports: Bun.Import[] }; scanImports(code: Bun.StringOrBuffer): Bun.Import[] }",
+      "docsUrl": "https://bun.com/docs/runtime/transpiler#scan",
       "runtime": "any",
-      "example": "const transpiler = new Bun.Transpiler({ loader: \"tsx\" });\nconsole.log(transpiler.transformSync(\"const App = () => <div>hi</div>;\"));"
+      "example": "const transpiler = new Bun.Transpiler({ loader: \"tsx\" });\nconst { exports, imports } = transpiler.scan(`\nimport React from \"react\";\nimport type { ReactNode } from \"react\";\nexport const name = \"hello\";\n`);\nconsole.log(exports, imports);\n// exports: [\"name\"]\n// imports: [{ kind: \"import-statement\", path: \"react\" }]\n// import kinds: import-statement | require-call | require-resolve | dynamic-import | import-rule | url-token | internal | entry-point-build | entry-point-run"
     },
     {
       "name": "Bun.plugin",

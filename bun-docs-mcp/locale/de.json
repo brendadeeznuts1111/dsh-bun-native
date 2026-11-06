@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Bun-Docs-MCP",
+    "description": "Verbindet den offiziellen MCP-Server der Bun-Dokumentation, damit der Agent bun.com-Seiten durchsuchen und lesen kann."
+  }
+}

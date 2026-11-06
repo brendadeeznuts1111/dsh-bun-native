@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "MCP des docs Bun",
+    "description": "Connecte le serveur MCP officiel de documentation de Bun pour que l’agent recherche et lise les pages bun.com."
+  }
+}

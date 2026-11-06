@@ -144,9 +144,10 @@ const services = {
 const { ctx, tools } = makeContext(services)
 plugin.apply(ctx, {})
 
-assert.deepEqual([...tools.keys()].sort(), ['bun_api', 'bun_exec', 'bun_project'], 'registers exactly three tools')
+assert.deepEqual([...tools.keys()].sort(), ['bun_api', 'bun_doctor', 'bun_exec', 'bun_project'], 'registers the four tools')
 assert.equal(sectionCalls.length, 1, 'registers one system-prompt section')
 assert.equal(sectionCalls[0].name, 'bun-native')
+assert.match(sectionCalls[0].text, /mcp__bun_docs__search_bun/, 'prompt points at the Bun docs MCP tools')
 
 const exec = { signal: new AbortController().signal, agent: { id: 'session-1', session: {} }, callId: 'call-1', name: 'test', arguments: {} }
 const report = (label, ok, detail = '') => console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail.length > 0 ? ` — ${detail}` : ''}`)
@@ -221,6 +222,9 @@ assert.equal(listing.entries.length, 0)
 assert.ok(listing.categories.every((category) => category.count >= 0))
 const search = await api.execute({ query: 'sqlite' }, exec)
 assert.ok(search.entries.length >= 1)
+const missing = await api.execute({ query: 'definitely-not-a-bun-api' }, exec)
+assert.equal(missing.returned, 0)
+assert.match(api.output.render({}, missing)[0].text, /Bun docs MCP/)
 const detailText = api.output.render({}, detail)[0].text
 assert.match(detailText, /Bun\.serve/)
 report('bun_api detail, category listing and search', true, `${detail.total} APIs in ${detail.categories.length} categories`)
@@ -269,5 +273,34 @@ assert.deepEqual(subprocess.calls.at(-1).argv, ['bun', 'add', 'zod@^3', '--dev']
 await assert.rejects(() => tools.get('bun_exec').execute({ mode: 'add', target: 'zod', filter: 'web' }, exec), /works with "run", "test", "install" only/)
 await assert.rejects(() => tools.get('bun_exec').execute({ mode: 'pm' }, exec), /requires `args`/)
 report('bun_exec pm, install/run/test filters and add', true)
+
+// --- bun_doctor ------------------------------------------------------------
+// bun_project above already cached `bun --version`, so the doctor's project
+// check spawns nothing; its first spawn is the properties probe.
+subprocess.enqueue({
+  stdout: `__BUN_NATIVE_PROBE__${JSON.stringify({
+    version: '1.4.4',
+    revision: 'abc123',
+    platform: 'win32',
+    arch: 'x64',
+    features: { serve: 'function', file: 'function', write: 'function', spawn: 'function', shell: 'function', glob: 'function', hashing: 'function', password: 'function', transpiler: 'function', build: 'function', moduleGraph: 'function', sqlite: 'module' },
+    catalog: { checked: 70, missing: [], uncoveredCount: 48, uncovered: ['Cookie'] },
+  })}\n`,
+  exitCode: 0,
+})
+const doctor = await tools.get('bun_doctor').execute({ checks: ['runtime', 'project', 'catalog'] }, exec)
+assertLossless(doctor, 'bun_doctor value')
+assert.equal(doctor.runtime.version, '1.4.4')
+assert.equal(doctor.summary.fail, 0)
+assert.ok(doctor.summary.pass >= 5)
+assert.ok(doctor.summary.warn >= 1)
+assert.ok(doctor.checks.some((check) => check.id === 'runtime.features' && check.status === 'pass'))
+assert.ok(doctor.checks.some((check) => check.id === 'catalog.entries' && check.status === 'pass'))
+assert.equal(doctor.tests, null)
+assert.match(tools.get('bun_doctor').output.render({}, doctor)[0].text, /Summary: \d+ pass, \d+ warn, 0 fail/)
+subprocess.enqueue({ stdout: '', stderr: '', exitCode: 0 })
+await tools.get('bun_exec').execute({ mode: 'ci' }, exec)
+assert.deepEqual(subprocess.calls.at(-1).argv, ['bun', 'ci'])
+report('bun_doctor report, checks and bun ci mode', true, JSON.stringify(doctor.summary))
 
 console.log('\nsmoke test complete')

@@ -21,7 +21,7 @@
  * @module @local/bun-native
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -54,7 +54,7 @@ const FOREIGN_LOCKFILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '
 /** Nested marker for the isolated workspace linker. */
 const ISOLATED_STORE = 'node_modules/.bun'
 
-const EXEC_MODES = ['run', 'test', 'install', 'add', 'eval', 'pm']
+const EXEC_MODES = ['run', 'test', 'install', 'add', 'ci', 'eval', 'pm']
 
 /**
  * Validate the row config against the documented options.
@@ -146,6 +146,7 @@ function renderApi(value) {
   if (value.entries.length === 0) {
     const lines = [`${value.total} Bun APIs available. No entry matched; list a category or try a name such as "Bun.serve".`, '']
     for (const category of value.categories) lines.push(`- ${category.id} (${category.count}) — ${category.title}`)
+    lines.push('', 'Live docs: if the Bun docs MCP server is connected, use mcp__bun_docs__search_bun, read_bun_page, grep_bun or list_bun_pages for guides and full pages beyond this digest.')
     return lines.join('\n')
   }
   const blocks = []
@@ -228,19 +229,27 @@ function renderProject(value) {
   return lines.join('\n')
 }
 
-/** Cached catalog document, loaded on the first `bun_api` call. */
+/** Cached catalog document plus the file stamp it was read at. */
 let catalogCache
 
 /** Cached `bun --version` result per executable, so project reads stay cheap. */
 const versionCache = new Map()
 
 /**
- * Load and validate the bundled Bun globals digest.
+ * Load and validate the bundled Bun globals digest. The cache is keyed on the
+ * file's modification time, so a catalog edit during development is picked up
+ * without reloading the plugin.
  * @returns {{bunVersion?: string, referenceUrl?: string, categories: any[], apis: any[]}}
  */
 function loadCatalog() {
-  if (catalogCache !== undefined) return catalogCache
   const file = fileURLToPath(new URL('./data/bun-globals.json', import.meta.url))
+  let mtimeMs
+  try {
+    mtimeMs = statSync(file).mtimeMs
+  } catch (error) {
+    throw new Error(`bun_api is unavailable: cannot read the bundled Bun catalog at ${file} (${error instanceof Error ? error.message : String(error)})`)
+  }
+  if (catalogCache !== undefined && catalogCache.mtimeMs === mtimeMs) return catalogCache.value
   let parsed
   try {
     parsed = JSON.parse(readFileSync(file, 'utf8'))
@@ -250,7 +259,7 @@ function loadCatalog() {
   if (parsed === null || typeof parsed !== 'object' || !Array.isArray(parsed.apis) || !Array.isArray(parsed.categories)) {
     throw new Error('bun_api is unavailable: the bundled Bun catalog is malformed (expected "apis" and "categories" arrays)')
   }
-  catalogCache = parsed
+  catalogCache = { mtimeMs, value: parsed }
   return parsed
 }
 
@@ -917,8 +926,356 @@ async function readRuntimeVersion(ctx, exec, config, cwd) {
   return value
 }
 
+/** Doctor check ids, in report order. */
+const DOCTOR_CHECKS = ['runtime', 'project', 'catalog', 'tests']
+
+/** Marker the Bun properties probe prints before its JSON payload. */
+const PROBE_MARKER = '__BUN_NATIVE_PROBE__'
+
 /**
- * Install the three tools and the optional Bun workflow guidance section.
+ * One-line reason for a thrown value.
+ * @param {unknown} error - thrown value.
+ * @returns {string}
+ */
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Whether a probe reported one of Bun's named exports as available.
+ * @param {unknown} value - probe value, e.g. "function", "object", "module" or "missing".
+ * @returns {boolean}
+ */
+function probeFeaturePresent(value) {
+  return typeof value === 'string' && value !== 'missing' && value !== 'undefined'
+}
+
+/**
+ * Source of the properties probe that runs inside the project's Bun runtime.
+ * It reports the runtime identity, whether the Bun native APIs the plugin relies
+ * on exist, and which curated catalog names are missing on that runtime.
+ * @param {string[]} catalogNames - `Bun.*` member names the catalog curates.
+ * @returns {string}
+ */
+function runtimeProbeSource(catalogNames) {
+  return `const marker = ${JSON.stringify(PROBE_MARKER)};
+const catalogNames = ${JSON.stringify(catalogNames)};
+const probe = (read) => {
+  try {
+    const value = read();
+    return value === undefined || value === null ? 'missing' : typeof value;
+  } catch {
+    return 'missing';
+  }
+};
+const sqlite = (() => {
+  try {
+    require('bun:sqlite');
+    return 'module';
+  } catch {
+    return 'missing';
+  }
+})();
+console.log(marker + JSON.stringify({
+  version: Bun.version,
+  revision: typeof Bun.revision === 'string' ? Bun.revision : null,
+  platform: process.platform,
+  arch: process.arch,
+  features: {
+    serve: probe(() => Bun.serve),
+    file: probe(() => Bun.file),
+    write: probe(() => Bun.write),
+    spawn: probe(() => Bun.spawn),
+    shell: probe(() => Bun.$),
+    glob: probe(() => Bun.Glob),
+    hashing: probe(() => Bun.hash),
+    password: probe(() => Bun.password),
+    transpiler: probe(() => Bun.Transpiler),
+    build: probe(() => Bun.build),
+    moduleGraph: probe(() => Bun.ModuleGraph),
+    sqlite,
+    sql: probe(() => Bun.SQL),
+    s3: probe(() => Bun.S3Client),
+    redis: probe(() => Bun.RedisClient),
+    ffi: probe(() => Bun.FFI),
+    image: probe(() => Bun.Image),
+  },
+  catalog: (() => {
+    const missing = catalogNames.filter((name) => !(name in Bun));
+    const globals = Object.getOwnPropertyNames(Bun);
+    const covered = new Set(catalogNames);
+    const uncovered = globals.filter((name) => !covered.has(name)).sort();
+    return { checked: catalogNames.length, missing, uncoveredCount: uncovered.length, uncovered };
+  })(),
+}));`
+}
+
+/**
+ * Run the properties probe in the project's Bun runtime.
+ * @param {any} ctx - the plugin context.
+ * @param {any} exec - execution context carrying the abort signal.
+ * @param {Record<string, any>} config - resolved plugin config.
+ * @param {string} cwd - directory to run in.
+ * @returns {Promise<Record<string, any>>}
+ */
+async function runRuntimeProbe(ctx, exec, config, cwd) {
+  const catalog = loadCatalog()
+  const names = [...new Set(catalog.apis
+    .map((entry) => /^Bun\.([A-Za-z_$][\w$]*)$/u.exec(entry.name)?.[1])
+    .filter((name) => typeof name === 'string'))]
+  const result = await runBun(ctx, exec, config, { args: ['--eval', runtimeProbeSource(names)], cwd, timeoutMs: 20_000 })
+  const line = result.stdout.text.split(/\r?\n/u).find((candidate) => candidate.startsWith(PROBE_MARKER))
+  if (result.timedOut) throw new Error('the Bun properties probe timed out')
+  if (result.exitCode !== 0 || line === undefined) {
+    const detail = result.stderr.text.trim() || result.stdout.text.trim() || `exit code ${result.exitCode}`
+    throw new Error(`the Bun properties probe failed: ${detail.slice(0, 400)}`)
+  }
+  try {
+    return JSON.parse(line.slice(PROBE_MARKER.length))
+  } catch {
+    throw new Error('the Bun properties probe returned malformed JSON')
+  }
+}
+
+/**
+ * Run the project's own `bun test` suite when it has one.
+ * @param {any} ctx - the plugin context.
+ * @param {any} exec - execution context carrying the abort signal.
+ * @param {Record<string, any>} config - resolved plugin config.
+ * @param {string} directory - project directory.
+ * @param {Record<string, any> | null} project - project inspection result.
+ * @returns {Promise<Record<string, any>>}
+ */
+async function runDoctorTests(ctx, exec, config, directory, project) {
+  const hasTestScript = project !== null && project.packageJson !== null && project.packageJson.scripts.some((script) => script.name === 'test')
+  let hasTestDirectory = false
+  const fs = ctx.get('fs')
+  if (fs !== undefined) {
+    try {
+      const target = await fs.resolve('test', { cwd: directory, signal: exec.signal })
+      hasTestDirectory = (await fs.stat(target, exec.signal)) !== undefined
+    } catch {
+      hasTestDirectory = false
+    }
+  }
+  if (!hasTestScript && !hasTestDirectory) return { ran: false, reason: 'no package.json "test" script and no test/ directory' }
+  try {
+    const result = await runBun(ctx, exec, config, { args: ['test'], cwd: directory, timeoutMs: 120_000 })
+    return lossless({
+      ran: true,
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      durationMs: result.durationMs,
+      stdout: result.stdout.text.slice(0, 3_000),
+      stderr: result.stderr.text.slice(0, 3_000),
+    })
+  } catch (error) {
+    return lossless({ ran: true, exitCode: null, timedOut: false, durationMs: 0, stdout: '', stderr: errorMessage(error) })
+  }
+}
+
+/**
+ * Build one doctor report: runtime properties, project health, catalog
+ * agreement and optionally the project's own test suite. It is the automation
+ * primitive a scheduled task can ask the agent to run, and the data source of
+ * the dashboard.
+ * @param {any} ctx - the plugin context.
+ * @param {any} exec - execution context carrying the abort signal.
+ * @param {Record<string, any>} config - resolved plugin config.
+ * @param {string} directory - project directory.
+ * @param {{checks?: string[], runTests?: boolean}} [options] - selected checks.
+ * @returns {Promise<Record<string, any>>}
+ */
+async function buildDoctorReport(ctx, exec, config, directory, options = {}) {
+  const wanted = new Set(Array.isArray(options.checks) && options.checks.length > 0 ? options.checks.filter((check) => DOCTOR_CHECKS.includes(check)) : ['runtime', 'project', 'catalog'])
+  if (options.runTests === true && !wanted.has('tests')) wanted.add('tests')
+  const startedAt = Date.now()
+  const checks = []
+  const add = (id, title, status, detail) => checks.push({ id, title, status, detail: String(detail).slice(0, 600) })
+  let project = null
+  let probe = null
+  let tests = null
+
+  if (wanted.has('project')) {
+    try {
+      project = await inspectProject(ctx, exec, directory, config, (cwd) => readRuntimeVersion(ctx, exec, config, cwd))
+      add('project.classification', 'Project classification', project.kind === 'bun-native' ? 'pass' : 'warn', `${project.kind} (${project.confidence}) in ${directory}`)
+      add(
+        'project.lockfile',
+        'Lockfile',
+        project.lockfile !== null ? 'pass' : 'warn',
+        project.lockfile === null
+          ? 'no bun.lock/bun.lockb in this directory'
+          : `${project.lockfile.file} (${project.lockfile.kind}${project.lockfile.lockfileVersion === undefined ? '' : `, lockfileVersion ${project.lockfile.lockfileVersion}`})`,
+      )
+      add('project.linker', 'Dependency layout', project.linker.strategy === 'unknown' ? 'warn' : 'pass', `linker ${project.linker.strategy}${project.linker.source === 'none' ? '' : ` (from ${project.linker.source})`}`)
+      if (project.workspace !== null) {
+        add('project.workspace', 'Workspace', 'pass', project.workspace.role === 'root' ? `root of ${project.workspace.patterns.join(', ')}` : `member ${project.workspace.memberName ?? project.workspace.memberPath} of ${project.workspace.root}`)
+      }
+      if (project.packageJson !== null) {
+        add('project.package', 'package.json', 'pass', `${project.packageJson.scripts.length} scripts, ${project.packageJson.dependencies} dependencies, ${project.packageJson.workspaceDependencies.length} workspace: dependencies`)
+      }
+    } catch (error) {
+      add('project.inspect', 'Project inspection', 'fail', errorMessage(error))
+    }
+  }
+
+  if (wanted.has('runtime') || wanted.has('catalog')) {
+    try {
+      probe = await runRuntimeProbe(ctx, exec, config, directory)
+    } catch (error) {
+      add('runtime.probe', 'Bun properties probe', 'fail', errorMessage(error))
+    }
+  }
+
+  if (probe !== null && wanted.has('runtime')) {
+    add('runtime.version', 'Bun runtime', 'pass', `Bun ${probe.version} on ${probe.platform}/${probe.arch}`)
+    const required = ['serve', 'file', 'write', 'spawn', 'shell', 'glob', 'hashing', 'password', 'transpiler', 'build', 'moduleGraph', 'sqlite']
+    const missing = required.filter((key) => !probeFeaturePresent(probe.features?.[key]))
+    add('runtime.features', 'Bun native properties', missing.length === 0 ? 'pass' : 'fail', missing.length === 0 ? `all ${required.length} probed APIs present` : `missing: ${missing.join(', ')}`)
+  }
+
+  if (probe !== null && wanted.has('catalog')) {
+    const catalog = loadCatalog()
+    const missing = Array.isArray(probe.catalog?.missing) ? probe.catalog.missing : []
+    add('catalog.entries', 'Catalog entries exist on this runtime', missing.length === 0 ? 'pass' : 'fail', missing.length === 0 ? `all ${probe.catalog?.checked ?? 0} curated names resolved` : `missing: ${missing.join(', ')}`)
+    add('catalog.version', 'Catalog matches the runtime', catalog.bunVersion === probe.version ? 'pass' : 'warn', catalog.bunVersion === probe.version ? `both Bun ${probe.version}` : `catalog ${catalog.bunVersion}, runtime ${probe.version}`)
+    const checked = probe.catalog?.checked ?? catalog.apis.length
+    const uncovered = probe.catalog?.uncoveredCount ?? 0
+    const coverage = checked + uncovered === 0 ? 1 : checked / (checked + uncovered)
+    add('catalog.coverage', 'Catalog coverage', coverage >= 0.8 ? 'pass' : 'warn', `${checked} curated, ${uncovered} uncovered (${Math.round(coverage * 100)}%)`)
+  }
+
+  if (wanted.has('tests')) {
+    tests = await runDoctorTests(ctx, exec, config, directory, project)
+    add('tests.bun-test', 'bun:test suite', tests.ran === false ? 'warn' : tests.exitCode === 0 ? 'pass' : 'fail', tests.ran === false ? tests.reason : `bun test exited ${tests.exitCode}${tests.timedOut === true ? ' (timed out)' : ''}`)
+  }
+
+  const summary = { pass: 0, warn: 0, fail: 0 }
+  for (const check of checks) summary[check.status] += 1
+  return lossless({
+    directory,
+    generatedAt: new Date().toISOString(),
+    durationMs: Date.now() - startedAt,
+    summary,
+    checks,
+    runtime: probe,
+    project: project === null ? null : {
+      kind: project.kind,
+      confidence: project.confidence,
+      signals: project.signals,
+      lockfile: project.lockfile,
+      linker: project.linker,
+      workspace: project.workspace,
+      packageJson: project.packageJson === null ? null : {
+        name: project.packageJson.name,
+        version: project.packageJson.version,
+        scripts: project.packageJson.scripts.map((script) => script.name),
+        workspaceDependencies: project.packageJson.workspaceDependencies,
+      },
+    },
+    tests,
+  })
+}
+
+/**
+ * Pick the directory the dashboard describes: the given directory when it is a
+ * Bun project, otherwise the first direct child that carries Bun markers.
+ * @param {any} ctx - the plugin context.
+ * @param {string} directory - starting directory.
+ * @param {AbortSignal} signal - cancellation.
+ * @returns {Promise<string>}
+ */
+async function pickDashboardDirectory(ctx, directory, signal) {
+  const fs = ctx.get('fs')
+  if (fs === undefined) return directory
+  const hasMarker = async (dir) => {
+    for (const marker of [MARKER_FILES.lockText, MARKER_FILES.lockBinary, MARKER_FILES.bunfig]) {
+      try {
+        const info = await fs.stat(await fs.resolve(marker, { cwd: dir, signal }), signal)
+        if (info !== undefined) return true
+      } catch {
+        // An unreadable marker path is not a marker.
+      }
+    }
+    return false
+  }
+  if (await hasMarker(directory)) return directory
+  try {
+    const entries = await fs.listDir(await fs.resolve(directory, { signal }), signal)
+    for (const entry of entries) {
+      if (entry.type !== 'directory' || entry.name.startsWith('.') || entry.name === 'node_modules') continue
+      const child = fs.processPath(entry.target)
+      if (await hasMarker(child)) return child
+    }
+  } catch {
+    return directory
+  }
+  return directory
+}
+
+/**
+ * Build the dashboard payload the Client fetches. Cheap checks only: the
+ * dashboard must not run a project's test suite on every open.
+ * @param {any} ctx - the plugin context.
+ * @param {Record<string, any>} config - resolved plugin config.
+ * @param {Request} request - the HTTP request (only for its abort signal).
+ * @returns {Promise<Record<string, any>>}
+ */
+async function buildDashboardSnapshot(ctx, config, request) {
+  const workingDirectory = ctx.get('workingDirectory')
+  const base = workingDirectory !== undefined && typeof workingDirectory.defaultDirectory === 'string' ? workingDirectory.defaultDirectory : process.cwd()
+  const directory = await pickDashboardDirectory(ctx, base, request.signal)
+  const exec = { signal: request.signal, agent: undefined, callId: 'bun-native-dashboard', name: 'bun_native_dashboard', arguments: {} }
+  const report = await buildDoctorReport(ctx, exec, config, directory, { checks: ['runtime', 'project', 'catalog'] })
+  const catalog = loadCatalog()
+  const counts = new Map()
+  for (const entry of catalog.apis) counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1)
+  return lossless({
+    generatedAt: report.generatedAt,
+    directory,
+    base,
+    durationMs: report.durationMs,
+    summary: report.summary,
+    checks: report.checks,
+    runtime: report.runtime === null ? null : {
+      version: report.runtime.version,
+      platform: report.runtime.platform,
+      arch: report.runtime.arch,
+      features: report.runtime.features,
+      catalog: { checked: report.runtime.catalog?.checked ?? 0, uncoveredCount: report.runtime.catalog?.uncoveredCount ?? 0 },
+    },
+    project: report.project,
+    catalog: {
+      bunVersion: catalog.bunVersion,
+      total: catalog.apis.length,
+      categories: catalog.categories.length,
+      categoryList: catalog.categories.map((category) => ({ id: category.id, title: category.title, count: counts.get(category.id) ?? 0 })),
+    },
+  })
+}
+
+/**
+ * Render a doctor report as model-facing text.
+ * @param {Record<string, any>} value - the tool's result value.
+ * @returns {string}
+ */
+function renderDoctor(value) {
+  const label = { pass: 'PASS', warn: 'WARN', fail: 'FAIL' }
+  const lines = [
+    `Bun doctor in ${value.directory}`,
+    `Summary: ${value.summary.pass} pass, ${value.summary.warn} warn, ${value.summary.fail} fail (${value.durationMs} ms)`,
+    '',
+  ]
+  for (const check of value.checks) lines.push(`${label[check.status] ?? check.status}  ${check.title} — ${check.detail}`)
+  if (value.tests !== null && value.tests.ran === true && value.tests.stdout.trim().length > 0) {
+    lines.push('', 'bun test output:', value.tests.stdout.trim().slice(0, 1_500))
+  }
+  return lines.join('\n')
+}
+
+/**
+ * Install the tools, the dashboard endpoint and the optional Bun workflow guidance.
  * @param {any} ctx - the plugin context.
  * @param {unknown} rawConfig - the row's config.
  */
@@ -1140,7 +1497,7 @@ export function apply(ctx, rawConfig) {
 
   const apiTool = {
     name: 'bun_api',
-    description: 'Look up the Bun runtime global API surface from a bundled offline digest of https://bun.com/reference/globals/bun. Use it before writing Bun-specific code: pass `name` for one API with its signature and example, `query` to search, or nothing to list categories. Prefer these built-ins over new dependencies in Bun-native projects.',
+    description: 'Look up the Bun runtime global API surface from a bundled offline digest of https://bun.com/reference/globals/bun. Use it before writing Bun-specific code: pass `name` for one API with its signature and example, `query` to search, or nothing to list categories. For guides, blog posts and full pages beyond this digest, use the Bun docs MCP tools (`mcp__bun_docs__search_bun`, `read_bun_page`, `grep_bun`, `list_bun_pages`) when they are available. Prefer these built-ins over new dependencies in Bun-native projects.',
     parameters: {
       name: {
         type: 'string',
@@ -1245,13 +1602,13 @@ export function apply(ctx, rawConfig) {
 
   const execTool = {
     name: 'bun_exec',
-    description: 'Run Bun in the session workspace under the active sandbox policy: `run` executes a package.json script or a file, `test` runs `bun test`, `install` runs `bun install`, `add` installs a package spec, `pm` runs a `bun pm` package-manager utility, and `eval` runs inline code with `bun --eval`. `filter` targets workspace members using Bun\'s real syntax (`bun --filter <pattern> <script>`, `bun install --filter <pattern>`); for `add` use `cwd`, because Bun has no filter flag for it. Non-zero exits are reported in the result, not as a failed call. Prefer `bun_project` first to learn the project\'s scripts, lockfile, workspace root and linker.',
+    description: 'Run Bun in the session workspace under the active sandbox policy: `run` executes a package.json script or a file, `test` runs `bun test`, `install` runs `bun install`, `add` installs a package spec, `ci` runs `bun ci` (frozen-lockfile install for CI), `pm` runs a `bun pm` package-manager utility, and `eval` runs inline code with `bun --eval`. `filter` targets workspace members using Bun\'s real syntax (`bun --filter <pattern> <script>`, `bun install --filter <pattern>`); for `add` use `cwd`, because Bun has no filter flag for it. Non-zero exits are reported in the result, not as a failed call. Prefer `bun_project` first to learn the project\'s scripts, lockfile, workspace root and linker.',
     parameters: {
       mode: {
         type: 'string',
         enum: EXEC_MODES,
         required: true,
-        description: 'What to run: "run" a script or file, "test" the bun:test suite, "install" dependencies, "add" a package, "pm" a package-manager utility, or "eval" inline code.',
+        description: 'What to run: "run" a script or file, "test" the bun:test suite, "install" dependencies, "add" a package, "ci" a frozen-lockfile install, "pm" a package-manager utility, or "eval" inline code.',
       },
       target: {
         type: 'string',
@@ -1355,6 +1712,8 @@ export function apply(ctx, rawConfig) {
       } else if (mode === 'add') {
         if (target === undefined) throw new Error('bun_exec mode "add" requires a `target` package spec, for example "zod@^3"')
         runArgs.push('add', target, ...extra)
+      } else if (mode === 'ci') {
+        runArgs.push('ci', ...extra)
       } else if (mode === 'pm') {
         if (extra.length === 0) throw new Error('bun_exec mode "pm" requires `args` naming a bun pm command, for example ["ls", "--all"]')
         runArgs.push('pm', ...extra)
@@ -1393,16 +1752,114 @@ export function apply(ctx, rawConfig) {
     isConcurrencySafe: () => false,
   }
 
+  const doctorTool = {
+    name: 'bun_doctor',
+    description: 'Test the Bun-native properties of a project and return a health report: a probe executed inside the project\'s Bun (version, platform, which native APIs exist), project checks (classification, lockfile, workspace root/member, linker, package manifest), catalog agreement (every curated API name resolves on this runtime, plus coverage), and optionally the project\'s own bun:test suite. Use it as the automation task for scheduled health checks; it reports failures instead of throwing unless the probe itself cannot run.',
+    parameters: {
+      path: {
+        type: 'string',
+        description: 'Project directory to diagnose. Defaults to the session working directory; a relative path is resolved against it.',
+      },
+      checks: {
+        type: 'array',
+        items: { type: 'string', enum: DOCTOR_CHECKS },
+        description: 'Which checks to run: "runtime" (Bun properties probe), "project" (classification, lockfile, workspace, linker), "catalog" (curated API names resolve here), "tests" (run bun test). Defaults to runtime, project and catalog.',
+      },
+      runTests: {
+        type: 'boolean',
+        description: 'Add the "tests" check: run the project\'s bun test suite (up to 120 seconds) and report its exit status.',
+      },
+      cwd: {
+        type: 'string',
+        description: 'Working directory. Defaults to the session working directory; a relative path is resolved against it.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['directory', 'generatedAt', 'durationMs', 'summary', 'checks', 'runtime', 'project', 'tests'],
+        properties: {
+          directory: { type: 'string' },
+          generatedAt: { type: 'string' },
+          durationMs: { type: 'number' },
+          summary: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['pass', 'warn', 'fail'],
+            properties: {
+              pass: { type: 'integer' },
+              warn: { type: 'integer' },
+              fail: { type: 'integer' },
+            },
+          },
+          checks: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['id', 'title', 'status', 'detail'],
+              properties: {
+                id: { type: 'string' },
+                title: { type: 'string' },
+                status: { type: 'string' },
+                detail: { type: 'string' },
+              },
+            },
+          },
+          runtime: { oneOf: [{ type: 'null' }, { type: 'object' }] },
+          project: { oneOf: [{ type: 'null' }, { type: 'object' }] },
+          tests: { oneOf: [{ type: 'null' }, { type: 'object' }] },
+        },
+      },
+      render: (_args, value) => textBlocks(renderDoctor(value)),
+    },
+    async execute(args, exec) {
+      const base = await sessionCwd(ctx, exec)
+      const requested = typeof args.cwd === 'string' ? args.cwd : typeof args.path === 'string' ? args.path : undefined
+      const directory = resolveDirectory(base, requested)
+      const checks = Array.isArray(args.checks) ? args.checks.map((check) => String(check)) : undefined
+      return await buildDoctorReport(ctx, exec, config, directory, { checks, runTests: args.runTests === true })
+    },
+    presentCall: () => ({ card: 'generic', title: 'Bun doctor', kind: 'execute' }),
+    presentResult: (_args, result) => {
+      const block = result.content.length === 1 ? result.content[0] : undefined
+      if (block === undefined || block.type !== 'text') return undefined
+      return { card: 'generic', content: textBlocks(`\`\`\`text\n${block.text.replace(/\n+$/, '')}\n\`\`\``) }
+    },
+    isConcurrencySafe: () => false,
+  }
+
   ctx.effect(() => {
     const disposers = [
       ctx.tools.register(projectTool),
       ctx.tools.register(apiTool),
       ctx.tools.register(execTool),
+      ctx.tools.register(doctorTool),
     ]
     return () => {
       for (const dispose of disposers) dispose()
     }
   })
+
+  // Dashboard endpoint: the Client page fetches this same walk the tools take.
+  const webServer = ctx.get('webServer')
+  if (webServer !== undefined && typeof webServer.register === 'function') {
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/api/bun-native/status',
+      resource: async (request, peer) => {
+        if (peer !== undefined && (peer.principal === undefined || peer.principal.kind !== 'owner')) {
+          return Response.json({ error: 'forbidden' }, { status: 403 })
+        }
+        try {
+          return Response.json(await buildDashboardSnapshot(ctx, config, request), { headers: { 'cache-control': 'no-store' } })
+        } catch (error) {
+          return Response.json({ error: errorMessage(error) }, { status: 500 })
+        }
+      },
+    }))
+  }
 
   if (config.promptGuidance) {
     const systemPrompt = ctx.get('systemPrompt')
@@ -1414,9 +1871,26 @@ export function apply(ctx, rawConfig) {
           '## Bun-native workflow',
           'Call `bun_project` before assuming a toolchain: Bun-native projects commit `bun.lock` (or `bunfig.toml`), and their scripts run through Bun.',
           'In a Bun-native project use `bun_exec` for scripts, tests and installs, and call `bun_api` before using a Bun-specific global (`Bun.serve`, `Bun.file`, `Bun.$`, `bun:sqlite`, `bun:test`).',
+          'If the Bun docs MCP tools are available (`mcp__bun_docs__search_bun`, `read_bun_page`, `grep_bun`, `list_bun_pages`), use them for guides, blog posts and full pages beyond `bun_api`\'s offline digest; read the `bun://skill` resource when starting a Bun task.',
           'Prefer those built-in Bun APIs over new dependencies; do not introduce npm, yarn or pnpm there.',
         ].join('\n'),
       }))
     }
   }
+}
+
+export {
+  buildDashboardSnapshot,
+  buildDoctorReport,
+  bunfigSections,
+  describeLockfile,
+  findWorkspaceRoot,
+  inspectProject,
+  loadCatalog,
+  rankApis,
+  readBunfigLinker,
+  readWorkspaceDependencies,
+  readWorkspaces,
+  resolveConfig,
+  runRuntimeProbe,
 }

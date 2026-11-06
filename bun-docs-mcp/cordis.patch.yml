@@ -1,0 +1,12 @@
+# Bun docs MCP — connects Bun's official documentation MCP server.
+# failOnStartupError: true makes a dead endpoint visible in the plugin row;
+# set it false (or enabled: false) in the profile patch to keep the profile
+# activating without the live docs tools.
+- insert:
+    - id: bun-docs-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: bun_docs
+        transport: streamable-http
+        url: https://bun.com/docs/mcp
+        failOnStartupError: true

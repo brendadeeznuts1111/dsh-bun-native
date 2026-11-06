@@ -1,0 +1,31 @@
+{
+  "name": "@local/bun-docs-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Connects Bun's official documentation MCP server so the agent can search, grep and read bun.com pages.",
+  "keywords": ["bun", "docs", "mcp", "documentation", "dsh-plugin"],
+  "author": "brendadeeznuts1111",
+  "homepage": "https://github.com/brendadeeznuts1111/dsh-bun-native#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brendadeeznuts1111/dsh-bun-native.git",
+    "directory": "bun-docs-mcp"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.1"
+  },
+  "exports": {
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  }
+}

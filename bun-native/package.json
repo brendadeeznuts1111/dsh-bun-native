@@ -1,10 +1,10 @@
 {
   "name": "@local/bun-native",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "Bun-native project awareness, an offline Bun globals catalog, and sandboxed Bun execution for the agent.",
-  "keywords": ["bun", "bun-native", "workspace", "monorepo", "dsh-plugin"],
+  "description": "Bun-native project awareness, an offline Bun globals catalog, sandboxed Bun execution, a project doctor, and live Bun docs via a companion MCP bundle.",
+  "keywords": ["bun", "bun-native", "workspace", "monorepo", "docs", "mcp", "dsh-plugin"],
   "author": "brendadeeznuts1111",
   "homepage": "https://github.com/brendadeeznuts1111/dsh-bun-native#readme",
   "repository": {
@@ -17,11 +17,13 @@
   },
   "exports": {
     ".": "./index.js",
+    "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
   "files": [
     "index.js",
+    "client.js",
     "data/bun-globals.json",
     "cordis.patch.yml",
     "locale/*.json",
@@ -31,6 +33,10 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
     }
   }
 }

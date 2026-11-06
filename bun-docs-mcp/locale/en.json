@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Bun docs MCP",
+    "description": "Connects Bun's official documentation MCP server so the agent can search, grep and read bun.com pages."
+  }
+}
