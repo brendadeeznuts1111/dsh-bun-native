@@ -22,6 +22,7 @@ publishing guide is <https://deepseek-harness.github.io/deepseek-harness/guide/p
 | `validate-index.mjs` | Port of the shipped format‑1 validator (the one DSH runs), so a document accepted here is accepted by Discover. |
 | `icons/bun-native.svg`, `icons/bun-docs-mcp.svg` | Icons served beside the index; referenced relatively so they work on any host. |
 | `serve.mjs` | Loopback static server for a local preview. |
+| `test/market.test.mjs` | `bun:test` coverage for the `dist-tags` channel rules and the multi-channel builder; `bun run test` runs it with the rest of the workspace. |
 
 ## Index URL
 
@@ -64,14 +65,50 @@ version's source to the commit you pass. `publishTimestamp` is the commit time
 (`git log -1 --format=%ct`) unless you pass `--publish-timestamp <unix>`,
 because the format defines it as the source commit's committer time.
 
+## Channels
+
+A plugin may list several versions and point npm distribution tags at them, so
+one index serves more than one channel. `latest` is the initial channel. DSH
+installs the exact version a channel records — never `name@latest` — and names
+the selected channel in the install confirmation. A channel target must be one
+of that plugin's listed versions; otherwise the reader rejects the whole index,
+and [`validate-index.mjs`](validate-index.mjs) enforces the same rule.
+
+Pin each version to the commit that contains it and record the channels:
+
+```sh
+bun market/build-index.mjs \
+  --release bun-native=1.2.4@565d85700f912a1dd795def0adae906bef4c7176#1793996858 \
+  --release bun-native=1.3.0-rc.1@<40-hex-commit-of-the-rc>#<its-committer-unix> \
+  --tag bun-native:latest=1.2.4 --tag bun-native:next=1.3.0-rc.1 \
+  --release bun-docs-mcp=1.0.0@565d85700f912a1dd795def0adae906bef4c7176#1793996858
+```
+
+- `--release <dir>=<version>@<40-hex>[#<unix>]` pins one version of one bundle.
+  `#<unix>` is that version's publish time — the commit's committer time; without
+  it `--publish-timestamp` applies to every release.
+- `--tag <dir>:<channel>=<version>` records a channel. A bundle with no `--tag`
+  gets `latest` at its package.json version.
+- `--commit <sha>` remains the single-channel shorthand: one release of every
+  bundle at its package.json version, tagged `latest`. A bundle pinned with
+  `--release` ignores it, so one index can mix both forms.
+- The greatest listed version must be the bundle's current `package.json`
+  version: title, description, icon and `engines.dsh` come from the working
+  tree, and the format takes display metadata from the highest listed version.
+  Publishing a channel therefore means bumping the bundle, committing, then
+  re-running the builder with that commit pinned.
+- Channel names are npm dist-tags: they must not be exact versions or SemVer
+  ranges. `latest=1.2.4`, `next=1.3.0-rc.1` is a typical stable/preview pair.
+
 ## Notes and limits
 
 - The npm/Git pinning rule is why these bundles cannot be listed as local
   directories: every version needs `name@version` from a registry or
   `https` Git URL + 40-hex commit. This index uses Git.
-- Each plugin currently lists one version. Add versions by rebuilding with the
-  new commit; the reader sorts them and installs the `latest` channel target
-  recorded in `dist-tags`.
+- Each plugin currently lists one version on one channel (`latest`). Add
+  channels with `--release` pins and `--tag`, as in [Channels](#channels); the
+  reader sorts versions by SemVer and installs the exact version each
+  `dist-tags` entry records.
 - `engines.dsh` is copied from each bundle's `package.json`. Keep it in sync
   with the bundle's actual DSH requirement.
 - The index is unsigned: titles, author, labels and the install source are this

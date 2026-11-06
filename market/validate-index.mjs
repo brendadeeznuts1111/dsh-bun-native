@@ -259,6 +259,38 @@ function versions(value, path) {
   return parsed.sort((left, right) => Bun.semver.order(right.version, left.version))
 }
 
+// npm distribution tags are channel names: a tag is a spec that is neither an
+// exact version nor a SemVer range (npm-package-arg decides by parsing a range
+// first). These patterns approximate that range detection without pulling npm's
+// semver range parser into a dependency-free workspace: an operator-led spec, or
+// a partial/wildcard version such as `1`, `1.x`, `v2` or `x`, is a range; other
+// shorter strings (`next`, `rc.1`, even `1abc`) are tags.
+const PARTIAL_VERSION = /^[vV]?(?:\d+|[xX*])(?:\.(?:\d+|[xX*])){0,2}(?:-[0-9A-Za-z.-]+)?$/u
+const RANGE_OPERATOR = /^[\^~><=*]/u
+
+function tagName(value, path) {
+  const name = stringAt(value, path)
+  if (/\s/u.test(name)) fail(path, 'must not contain whitespace')
+  if (SEMVER.test(name)) fail(path, 'must be a channel name, not an exact version')
+  if (RANGE_OPERATOR.test(name) || PARTIAL_VERSION.test(name)) fail(path, 'must be a channel name, not a SemVer range')
+  return name
+}
+
+function distTags(value, path, listed) {
+  if (value === undefined) return {}
+  const object = objectAt(value, path)
+  const available = new Set(listed.map((entry) => entry.version))
+  const tags = {}
+  for (const [name, target] of Object.entries(object)) {
+    const at = `${path}.${name}`
+    const tag = tagName(name, at)
+    const version = stringAt(target, at)
+    if (!available.has(version)) fail(at, `references undeclared version ${JSON.stringify(version)}`)
+    tags[tag] = version
+  }
+  return tags
+}
+
 function plugin(value, path, index, indexUrl) {
   const object = objectAt(value, path)
   const name = stringAt(object.name, `${path}.name`)
@@ -269,6 +301,8 @@ function plugin(value, path, index, indexUrl) {
   const author = optional(object, 'author', path, stringAt)
   const homepage = optional(object, 'homepage', path, homepageUrl)
   const repo = optional(object, 'repository', path, repository)
+  const listed = versions(object.versions, `${path}.versions`)
+  const tags = distTags(object['dist-tags'], `${path}.dist-tags`, listed)
   return {
     name,
     ...(title === undefined ? {} : { title }),
@@ -278,7 +312,8 @@ function plugin(value, path, index, indexUrl) {
     ...(homepage === undefined ? {} : { homepage }),
     ...(repo === undefined ? {} : { repository: repo }),
     metadata: pluginMetadata(object.metadata, `${path}.metadata`, index),
-    versions: versions(object.versions, `${path}.versions`),
+    ...(Object.keys(tags).length === 0 ? {} : { distTags: tags }),
+    versions: listed,
   }
 }
 
@@ -326,7 +361,10 @@ if (import.meta.main) {
     console.log(`PASS ${file}`)
     console.log(`  index url: ${indexUrl}`)
     for (const entry of parsed.plugins) {
-      console.log(`  plugin: ${entry.name} (${entry.versions.length} version(s), default ${entry.versions[0]?.version})`)
+      const channels = Object.entries(entry.distTags ?? {})
+      const initial = entry.distTags?.latest ?? entry.versions[0]?.version
+      console.log(`  plugin: ${entry.name} (${entry.versions.length} version(s), latest ${initial})`)
+      if (channels.length > 0) console.log(`    channels: ${channels.map(([channel, version]) => `${channel}=${version}`).join(', ')}`)
       for (const version of entry.versions) {
         const from = version.source
         console.log(`    ${version.version} <- ${from.type}${from.type === 'git' ? ` ${from.url}#${from.commit}${from.path === undefined ? '' : ` path=/${from.path}`}` : ''}`)
