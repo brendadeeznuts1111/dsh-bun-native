@@ -197,8 +197,7 @@ a monorepo's dependency state:
   `file:` spec, or a workspace's own version) work in the hoisted linker and
   with `bun patch`/`patchedDependencies`.
 
-Verified locally on 1.4.4 (Windows, workspace sandbox; fixtures in
-`scratch/verify-144/`): `bun outdated` against an unreachable registry exited 1
+Verified locally on 1.4.4 (Windows, workspace sandbox): `bun outdated` against an unreachable registry exited 1
 with `error: ConnectionRefused downloading package manifest is-odd`; a project
 `.npmrc` with `registry="${PROBE_REGISTRY}"` used the environment-provided
 registry; a local registry received `Authorization: Basic …` from a URL with
