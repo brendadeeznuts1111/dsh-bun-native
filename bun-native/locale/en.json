@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Bun native",
+    "description": "Detects Bun-native projects, answers Bun global API questions offline, and runs Bun tasks, tests and installs inside the session sandbox."
+  }
+}

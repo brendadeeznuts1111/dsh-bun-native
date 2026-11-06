@@ -1,0 +1,711 @@
+{
+  "bunVersion": "1.4.4",
+  "referenceUrl": "https://bun.com/reference/globals/bun",
+  "generatedAt": "2026-11-06",
+  "categories": [
+    { "id": "networking", "title": "HTTP servers and networking", "summary": "HTTP servers, TCP/UDP sockets and the fetch client built into the Bun global." },
+    { "id": "files", "title": "Files and paths", "summary": "Reading, writing, streaming, memory-mapping and globbing files, plus URL/path conversion." },
+    { "id": "process", "title": "Process and environment", "summary": "Command-line arguments, environment variables, working directory, executable lookup and timing helpers." },
+    { "id": "runtime", "title": "Runtime control", "summary": "Version information, garbage-collection control, native secrets, cron scheduling and compiled-executable state." },
+    { "id": "shell", "title": "Bun Shell", "summary": "Cross-platform shell scripting through tagged template literals." },
+    { "id": "subprocess", "title": "Child processes", "summary": "Spawning children synchronously or asynchronously and driving them through a pseudo-terminal." },
+    { "id": "hashing", "title": "Hashing and security", "summary": "Fast hashing, cryptographic digests, password hashing, UUIDs and CSRF tokens." },
+    { "id": "compression", "title": "Compression and archives", "summary": "gzip, deflate and zstd compression plus tar archive creation and extraction." },
+    { "id": "encoding", "title": "Text and encoding utilities", "summary": "Object inspection, deep equality, HTML escaping and ANSI-aware string measurement and slicing." },
+    { "id": "storage", "title": "Databases and object storage", "summary": "SQL clients for SQLite and Postgres, a Redis client, and S3-compatible object storage." },
+    { "id": "parsing", "title": "Parsing and serialization", "summary": "Parsers and stringifiers for TOML, YAML, JSON5, JSONL, XML and Markdown." },
+    { "id": "tooling", "title": "Build and tooling", "summary": "Bundling, transpiling, module resolution, plugins and native FFI bindings." }
+  ],
+  "apis": [
+    {
+      "name": "Bun.serve",
+      "category": "networking",
+      "kind": "function",
+      "summary": "Starts an HTTP(S) server with a fetch handler and optional WebSocket, static-route and TLS options. Returns a Server whose url, port and stop() let you inspect and shut it down.",
+      "signature": "Bun.serve<WebSocketData = undefined, R extends string = never>(options: Bun.Serve.Options<WebSocketData, R>): Bun.Server<WebSocketData>",
+      "docsUrl": "https://bun.com/docs/runtime/http/server",
+      "runtime": "server",
+      "example": "const server = Bun.serve({\n  port: 0,\n  fetch(req) {\n    return new Response(`Hello from ${req.url}`);\n  },\n});\nconsole.log(server.url.href);\nserver.stop();"
+    },
+    {
+      "name": "Bun.listen",
+      "category": "networking",
+      "kind": "function",
+      "summary": "Creates a TCP or Unix-domain socket server and invokes the socket handlers for open, data, close and error events. The returned listener exposes port, hostname, reload() and stop().",
+      "signature": "Bun.listen<Data = undefined>(options: Bun.TCPSocketListenOptions<Data>): Bun.TCPSocketListener<Data>",
+      "docsUrl": "https://bun.com/docs/runtime/networking/tcp",
+      "runtime": "server",
+      "example": "const listener = Bun.listen({\n  hostname: \"127.0.0.1\",\n  port: 0,\n  socket: { data(socket, data) { socket.write(`echo: ${data}`); } },\n});\nconsole.log(listener.port);\nlistener.stop();"
+    },
+    {
+      "name": "Bun.connect",
+      "category": "networking",
+      "kind": "function",
+      "summary": "Opens a TCP or TLS client connection and resolves once the socket is connected. Data, close, connect and error handlers are passed in the options object.",
+      "signature": "Bun.connect<Data = undefined>(options: Bun.TCPSocketConnectOptions<Data>): Promise<Bun.Socket<Data>>",
+      "docsUrl": "https://bun.com/docs/runtime/networking/tcp",
+      "runtime": "any",
+      "example": "const listener = Bun.listen({ hostname: \"127.0.0.1\", port: 0, socket: { data() {} } });\nconst socket = await Bun.connect({ hostname: \"127.0.0.1\", port: listener.port, socket: { data(s, d) { console.log(d.toString()); } } });\nsocket.write(\"ping\");\nawait Bun.sleep(20);\nsocket.end();\nlistener.stop(true);"
+    },
+    {
+      "name": "Bun.udpSocket",
+      "category": "networking",
+      "kind": "function",
+      "summary": "Binds a UDP socket for sending and receiving datagrams, optionally connected to a fixed remote address. Resolves to a socket with send(), close(), port and address.",
+      "signature": "Bun.udpSocket<DataBinaryType extends Bun.BinaryType = \"buffer\">(options: Bun.udp.SocketOptions<DataBinaryType>): Promise<Bun.udp.Socket<DataBinaryType>>",
+      "docsUrl": "https://bun.com/docs/runtime/networking/udp",
+      "runtime": "server",
+      "example": "const server = await Bun.udpSocket({ hostname: \"127.0.0.1\", port: 0, socket: { data(s, d, p, a) { s.send(\"pong\", p, a); } } });\nconst client = await Bun.udpSocket({ hostname: \"127.0.0.1\", port: 0, socket: {} });\nclient.send(\"ping\", server.port, \"127.0.0.1\");\nawait Bun.sleep(50);\nclient.close();\nserver.close();\nconsole.log(\"udp ping/pong done\");"
+    },
+    {
+      "name": "Bun.fetch",
+      "category": "networking",
+      "kind": "function",
+      "summary": "Bun's implementation of the WHATWG fetch API, re-exported on the Bun namespace. It adds Bun-specific request options such as proxy, TLS settings and connection reuse.",
+      "signature": "Bun.fetch(input: string | URL | Request, init?: BunFetchRequestInit): Promise<Response>",
+      "docsUrl": "https://bun.com/docs/runtime/networking/fetch",
+      "runtime": "any",
+      "example": "const res = await Bun.fetch(\"https://bun.com\");\nconsole.log(res.status, res.headers.get(\"content-type\"));\nconsole.log((await res.text()).length);"
+    },
+    {
+      "name": "Bun.file",
+      "category": "files",
+      "kind": "function",
+      "summary": "Creates a lazy BunFile reference to a path, a file descriptor or in-memory bytes. The file is not read until you call text(), json(), bytes(), stream() or similar.",
+      "signature": "Bun.file(path: string | URL, options?: BlobPropertyBag): BunFile",
+      "docsUrl": "https://bun.com/docs/runtime/file-io",
+      "runtime": "any",
+      "example": "const file = Bun.file(\"./package.json\");\nconsole.log(file.type);\nconst pkg = await file.json();\nconsole.log(pkg.name);"
+    },
+    {
+      "name": "Bun.write",
+      "category": "files",
+      "kind": "function",
+      "summary": "Writes a string, typed array, Blob, Response, ReadableStream or Archive to a path, BunFile or S3 file. Resolves to the number of bytes written and creates parent directories by default.",
+      "signature": "Bun.write(destination: BunFile | PathLike, input: Blob | BufferSource | string | ReadableStream, options?: { mode?: number; createPath?: boolean }): Promise<number>",
+      "docsUrl": "https://bun.com/docs/runtime/file-io",
+      "runtime": "any",
+      "example": "const bytes = await Bun.write(\"hello.txt\", \"Hello Bun!\");\nconsole.log(bytes);\nconsole.log(await Bun.file(\"hello.txt\").text());"
+    },
+    {
+      "name": "Bun.stdin",
+      "category": "files",
+      "kind": "object",
+      "summary": "The process standard input as a BunFile. Read it with text(), json(), bytes(), stream() or arrayBuffer().",
+      "signature": "Bun.stdin: BunFile",
+      "docsUrl": "https://bun.com/docs/runtime/file-io",
+      "runtime": "any",
+      "example": "const input = await Bun.stdin.text();\nconsole.log(\"stdin length:\", input.length);"
+    },
+    {
+      "name": "Bun.stdout",
+      "category": "files",
+      "kind": "object",
+      "summary": "The process standard output as a BunFile. Supports write() and file descriptor access.",
+      "signature": "Bun.stdout: BunFile",
+      "docsUrl": "https://bun.com/docs/runtime/file-io",
+      "runtime": "any",
+      "example": "Bun.stdout.write(\"hello from stdout\\n\");\nconsole.log(\"wrote to stdout\");"
+    },
+    {
+      "name": "Bun.stderr",
+      "category": "files",
+      "kind": "object",
+      "summary": "The process standard error as a BunFile, useful for diagnostics that should bypass stdout.",
+      "signature": "Bun.stderr: BunFile",
+      "docsUrl": "https://bun.com/docs/runtime/file-io",
+      "runtime": "any",
+      "example": "Bun.stderr.write(\"something went wrong\\n\");\nconsole.log(\"logged to stderr\");"
+    },
+    {
+      "name": "Bun.mmap",
+      "category": "files",
+      "kind": "function",
+      "summary": "Memory-maps a file into a Uint8Array without copying its contents. Currently supported on Linux and macOS, not on Windows.",
+      "signature": "Bun.mmap(path: string, opts?: Bun.MMapOptions): Uint8Array",
+      "docsUrl": "https://bun.com/docs/runtime/bun-apis",
+      "runtime": "any",
+      "example": "const map = Bun.mmap(\"./hello.txt\");\nconsole.log(new TextDecoder().decode(map));"
+    },
+    {
+      "name": "Bun.Glob",
+      "category": "files",
+      "kind": "class",
+      "summary": "Matches file paths against glob patterns. scan() and scanSync() walk a directory tree, and match() tests a single path string.",
+      "signature": "class Bun.Glob { constructor(pattern: string); scan(optionsOrCwd?: string | Bun.GlobScanOptions): AsyncIterableIterator<string>; scanSync(optionsOrCwd?: string | Bun.GlobScanOptions): IterableIterator<string>; match(str: string): boolean }",
+      "docsUrl": "https://bun.com/docs/runtime/glob",
+      "runtime": "any",
+      "example": "const glob = new Bun.Glob(\"**/*.ts\");\nfor await (const path of glob.scan({ cwd: import.meta.dir })) {\n  console.log(path);\n}"
+    },
+    {
+      "name": "Bun.fileURLToPath",
+      "category": "files",
+      "kind": "function",
+      "summary": "Converts a file: URL into a platform-native filesystem path.",
+      "signature": "Bun.fileURLToPath(url: URL | string): string",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const path = Bun.fileURLToPath(Bun.pathToFileURL(Bun.main));\nconsole.log(path === Bun.main);"
+    },
+    {
+      "name": "Bun.pathToFileURL",
+      "category": "files",
+      "kind": "function",
+      "summary": "Converts a filesystem path into a file: URL object.",
+      "signature": "Bun.pathToFileURL(path: string): URL",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const url = Bun.pathToFileURL(Bun.main);\nconsole.log(url.protocol, url.href.startsWith(\"file://\"));"
+    },
+    {
+      "name": "Bun.argv",
+      "category": "process",
+      "kind": "value",
+      "summary": "The raw process arguments: the Bun executable, the script path, and any flags passed to the script.",
+      "signature": "Bun.argv: string[]",
+      "docsUrl": "https://bun.com/guides/process/argv",
+      "runtime": "any",
+      "example": "console.log(Bun.argv[0]);\nconsole.log(Bun.argv.slice(2));"
+    },
+    {
+      "name": "Bun.env",
+      "category": "process",
+      "kind": "object",
+      "summary": "The process environment variables as a mutable object. Values are strings or undefined and assignments affect the child processes Bun spawns.",
+      "signature": "Bun.env: Record<string, string | undefined>",
+      "docsUrl": "https://bun.com/docs/runtime/environment-variables",
+      "runtime": "any",
+      "example": "const mode = Bun.env.NODE_ENV ?? \"development\";\nconsole.log(mode);\nconsole.log(Object.keys(Bun.env).length);"
+    },
+    {
+      "name": "Bun.cwd",
+      "category": "process",
+      "kind": "value",
+      "summary": "The absolute path of the process working directory as a string. Present on the Bun global in this runtime even though it is not yet listed on the reference page.",
+      "signature": "Bun.cwd: string",
+      "docsUrl": "https://bun.com/reference/globals/bun",
+      "runtime": "any",
+      "example": "console.log(Bun.cwd);\nconsole.log(Bun.cwd === process.cwd());"
+    },
+    {
+      "name": "Bun.main",
+      "category": "process",
+      "kind": "value",
+      "summary": "The absolute path of the entrypoint script that launched the process, or a synthetic path when code is evaluated with -e.",
+      "signature": "Bun.main: string",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "console.log(Bun.main);\nconsole.log(import.meta.main);"
+    },
+    {
+      "name": "Bun.which",
+      "category": "process",
+      "kind": "function",
+      "summary": "Locates an executable on PATH, the same way the which command does, and returns its absolute path or null.",
+      "signature": "Bun.which(command: string, options?: Bun.WhichOptions): string | null",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const bunPath = Bun.which(\"bun\");\nconsole.log(bunPath ?? \"bun not found\");"
+    },
+    {
+      "name": "Bun.sleep",
+      "category": "process",
+      "kind": "function",
+      "summary": "Returns a promise that resolves after a number of milliseconds or at a given Date, without blocking the event loop.",
+      "signature": "Bun.sleep(ms: number | Date): Promise<void>",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "await Bun.sleep(100);\nconsole.log(\"100ms later\");"
+    },
+    {
+      "name": "Bun.sleepSync",
+      "category": "process",
+      "kind": "function",
+      "summary": "Blocks the current thread for a number of milliseconds. Prefer Bun.sleep in async code.",
+      "signature": "Bun.sleepSync(ms: number): void",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "Bun.sleepSync(10);\nconsole.log(\"blocked for 10ms\");"
+    },
+    {
+      "name": "Bun.version",
+      "category": "runtime",
+      "kind": "value",
+      "summary": "The Bun version string of the running runtime, for example \"1.4.4\".",
+      "signature": "Bun.version: string",
+      "docsUrl": "https://bun.com/reference/globals/bun/version",
+      "runtime": "any",
+      "example": "console.log(`running bun ${Bun.version}`);\nconsole.log(Bun.version_with_sha.startsWith(`v${Bun.version}`));"
+    },
+    {
+      "name": "Bun.nanoseconds",
+      "category": "runtime",
+      "kind": "function",
+      "summary": "Returns a high-resolution monotonic timestamp in nanoseconds, useful for benchmarking.",
+      "signature": "Bun.nanoseconds(): number",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const start = Bun.nanoseconds();\nawait Bun.sleep(10);\nconsole.log(Bun.nanoseconds() - start, \"ns\");"
+    },
+    {
+      "name": "Bun.gc",
+      "category": "runtime",
+      "kind": "function",
+      "summary": "Forces the JavaScriptCore garbage collector to run, optionally synchronously. Mostly useful in tests and benchmarks.",
+      "signature": "Bun.gc(force?: boolean): void",
+      "docsUrl": "https://bun.com/docs/runtime/bun-apis",
+      "runtime": "any",
+      "example": "Bun.gc(true);\nconsole.log(\"garbage collected\");"
+    },
+    {
+      "name": "Bun.unsafe",
+      "category": "runtime",
+      "kind": "namespace",
+      "summary": "Low-level helpers such as zero-copy byte-to-string conversion, GC aggression levels and memory footprint reporting. Intended for benchmarking and debugging, not daily code.",
+      "signature": "Bun.unsafe: { arrayBufferToString(buffer: Uint8Array | ArrayBufferLike): string; gcAggressionLevel(level?: 0 | 1 | 2): 0 | 1 | 2; memoryFootprint(): number | undefined; mimallocDump(): void }",
+      "docsUrl": "https://bun.com/reference/globals/bun/unsafe",
+      "runtime": "any",
+      "example": "const buf = new TextEncoder().encode(\"hello\");\nconst str = Bun.unsafe.arrayBufferToString(buf);\nconsole.log(str);\nconsole.log(Bun.unsafe.memoryFootprint());"
+    },
+    {
+      "name": "Bun.secrets",
+      "category": "runtime",
+      "kind": "object",
+      "summary": "Stores and retrieves credentials in the operating system's secure storage: Keychain on macOS, libsecret on Linux and Credential Manager on Windows.",
+      "signature": "Bun.secrets: { get(options: { service: string; name: string }): Promise<string | null>; set(options: { service: string; name: string; value: string }): Promise<void>; delete(options: { service: string; name: string }): Promise<boolean> }",
+      "docsUrl": "https://bun.com/docs/runtime/secrets",
+      "runtime": "any",
+      "example": "await Bun.secrets.set({ service: \"my-app\", name: \"token\", value: \"s3cret\" });\nconst token = await Bun.secrets.get({ service: \"my-app\", name: \"token\" });\nconsole.log(token);\nawait Bun.secrets.delete({ service: \"my-app\", name: \"token\" });"
+    },
+    {
+      "name": "Bun.embeddedFiles",
+      "category": "runtime",
+      "kind": "value",
+      "summary": "The list of Blob files embedded in a standalone executable produced by bun build --compile. Empty in normal Bun runs.",
+      "signature": "Bun.embeddedFiles: readonly Blob[]",
+      "docsUrl": "https://bun.com/docs/compiler/executables",
+      "runtime": "any",
+      "example": "if (Bun.isStandaloneExecutable) {\n  for (const file of Bun.embeddedFiles) console.log(file.name);\n}"
+    },
+    {
+      "name": "Bun.cron",
+      "category": "runtime",
+      "kind": "function",
+      "summary": "Schedules an in-process cron job that calls a handler on a five-field schedule or nickname. The returned job exposes cron, ref(), unref() and stop().",
+      "signature": "Bun.cron(schedule: string, handler: () => unknown, options?: Bun.CronOptions): Bun.CronJob",
+      "docsUrl": "https://bun.com/docs/runtime/cron",
+      "runtime": "server",
+      "example": "const job = Bun.cron(\"*/5 * * * *\", () => {\n  console.log(\"tick\");\n});\nconsole.log(job.cron);\njob.stop();"
+    },
+    {
+      "name": "Bun.isStandaloneExecutable",
+      "category": "runtime",
+      "kind": "value",
+      "summary": "True when the current process is a standalone executable produced by bun build --compile, false when running under the bun binary.",
+      "signature": "Bun.isStandaloneExecutable: boolean",
+      "docsUrl": "https://bun.com/docs/compiler/executables",
+      "runtime": "any",
+      "example": "console.log(\"standalone:\", Bun.isStandaloneExecutable);\nconsole.log(\"embedded files:\", Bun.embeddedFiles.length);"
+    },
+    {
+      "name": "Bun.$",
+      "category": "shell",
+      "kind": "function",
+      "summary": "Runs shell commands with Bun Shell using tagged template literals. Returns a shell result whose text(), json(), quiet() and exit code you can consume.",
+      "signature": "Bun.$(strings: TemplateStringsArray, ...expressions: Bun.ShellExpression[]): BunShell",
+      "docsUrl": "https://bun.com/docs/runtime/shell",
+      "runtime": "any",
+      "example": "const result = await Bun.$`echo \"Hello, world!\"`.text();\nconsole.log(result.trim());"
+    },
+    {
+      "name": "Bun.spawn",
+      "category": "subprocess",
+      "kind": "function",
+      "summary": "Starts a child process asynchronously and returns a Subprocess handle with stdin, stdout, stderr, exited and kill().",
+      "signature": "Bun.spawn<In extends Bun.SpawnOptions.Writable = \"ignore\", Out extends Bun.SpawnOptions.Readable = \"pipe\", Err extends Bun.SpawnOptions.Readable = \"inherit\">(options: Bun.SpawnOptions.SpawnOptions<In, Out, Err>): Bun.Subprocess<In, Out, Err>",
+      "docsUrl": "https://bun.com/docs/runtime/child-process",
+      "runtime": "any",
+      "example": "const proc = Bun.spawn([\"bun\", \"--version\"]);\nconst version = await new Response(proc.stdout).text();\nawait proc.exited;\nconsole.log(version.trim());"
+    },
+    {
+      "name": "Bun.spawnSync",
+      "category": "subprocess",
+      "kind": "function",
+      "summary": "Runs a child process synchronously and returns its exit code plus captured stdout and stderr buffers.",
+      "signature": "Bun.spawnSync<In extends Bun.SpawnOptions.Writable = \"ignore\", Out extends Bun.SpawnOptions.Readable = \"pipe\", Err extends Bun.SpawnOptions.Readable = \"pipe\">(options: Bun.SpawnOptions.SpawnSyncOptions<In, Out, Err>): Bun.SyncSubprocess<In, Out, Err>",
+      "docsUrl": "https://bun.com/docs/runtime/child-process",
+      "runtime": "any",
+      "example": "const { stdout, exitCode } = Bun.spawnSync([\"bun\", \"--version\"]);\nconsole.log(exitCode, stdout.toString().trim());"
+    },
+    {
+      "name": "Bun.Terminal",
+      "category": "subprocess",
+      "kind": "class",
+      "summary": "Creates a pseudo-terminal (PTY) that a spawned process can use as its terminal, so interactive programs get a real TTY. Supports write(), resize() and setRawMode().",
+      "signature": "class Bun.Terminal { constructor(options: Bun.TerminalOptions); write(data: string | BufferSource): number; resize(cols: number, rows: number): void; setRawMode(enabled: boolean): void }",
+      "docsUrl": "https://bun.com/reference/globals/bun/Terminal",
+      "runtime": "any",
+      "example": "const terminal = new Bun.Terminal({\n  cols: 80,\n  rows: 24,\n  data(term, data) { process.stdout.write(data); },\n});\nconst proc = Bun.spawn([\"bun\", \"--version\"], { terminal });\nawait proc.exited;\nterminal.close();"
+    },
+    {
+      "name": "Bun.hash",
+      "category": "hashing",
+      "kind": "function",
+      "summary": "Hashes a string or buffer with the fast non-cryptographic wyhash algorithm and returns a bigint. An optional seed changes the result.",
+      "signature": "Bun.hash(data: string | ArrayBufferView | ArrayBuffer | SharedArrayBuffer, seed?: number | bigint): bigint",
+      "docsUrl": "https://bun.com/docs/runtime/hashing",
+      "runtime": "any",
+      "example": "const h = Bun.hash(\"hello world\");\nconsole.log(h.toString(16));\nconsole.log(Bun.hash(\"hello world\", 123n).toString(16));"
+    },
+    {
+      "name": "Bun.CryptoHasher",
+      "category": "hashing",
+      "kind": "class",
+      "summary": "Incremental cryptographic hasher supporting the algorithms of node:crypto, including HMAC when a key is supplied. update() feeds data and digest() finalizes.",
+      "signature": "class Bun.CryptoHasher { constructor(algorithm: Bun.SupportedCryptoAlgorithms, hmacKey?: string | NodeJS.TypedArray); update(input: Bun.BlobOrStringOrBuffer, inputEncoding?: string): Bun.CryptoHasher; digest(encoding?: Bun.DigestEncoding): string; copy(): Bun.CryptoHasher }",
+      "docsUrl": "https://bun.com/docs/runtime/hashing",
+      "runtime": "any",
+      "example": "const hasher = new Bun.CryptoHasher(\"sha256\");\nhasher.update(\"hello \");\nhasher.update(\"world\");\nconsole.log(hasher.digest(\"hex\"));"
+    },
+    {
+      "name": "Bun.sha",
+      "category": "hashing",
+      "kind": "function",
+      "summary": "Hashes input with SHA-512/256 and returns either the raw digest bytes or an encoded string such as hex or base64.",
+      "signature": "Bun.sha(input: Bun.StringOrBuffer, encoding: Bun.DigestEncoding): string",
+      "docsUrl": "https://bun.com/docs/runtime/hashing",
+      "runtime": "any",
+      "example": "console.log(Bun.sha(\"hello world\", \"hex\"));\nconsole.log(Bun.sha(\"hello world\", \"base64\"));"
+    },
+    {
+      "name": "Bun.password",
+      "category": "hashing",
+      "kind": "object",
+      "summary": "Hashes and verifies passwords with argon2 or bcrypt, choosing and tuning the algorithm with an options object. Hash strings are stored in PHC or Modular Crypt Format.",
+      "signature": "Bun.password.hash(password: Bun.StringOrBuffer, options?: { algorithm?: \"argon2id\" | \"argon2i\" | \"argon2d\" | \"bcrypt\"; memoryCost?: number; timeCost?: number; cost?: number }): Promise<string>",
+      "docsUrl": "https://bun.com/docs/runtime/hashing",
+      "runtime": "any",
+      "example": "const hash = await Bun.password.hash(\"hunter2\", { algorithm: \"argon2id\" });\nconsole.log(await Bun.password.verify(\"hunter2\", hash));"
+    },
+    {
+      "name": "Bun.randomUUIDv7",
+      "category": "hashing",
+      "kind": "function",
+      "summary": "Generates a time-ordered UUIDv7 that sorts chronologically, encoded as hex, base64, base64url or a Buffer.",
+      "signature": "Bun.randomUUIDv7(encoding?: \"hex\" | \"base64\" | \"base64url\", timestamp?: number | Date): string",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const id = Bun.randomUUIDv7();\nconsole.log(id);\nconsole.log(Bun.randomUUIDv7(\"base64url\"));"
+    },
+    {
+      "name": "Bun.randomUUIDv5",
+      "category": "hashing",
+      "kind": "function",
+      "summary": "Generates a deterministic name-based UUIDv5 from a name and a namespace UUID (or one of the predefined dns, url, oid, x500 namespaces).",
+      "signature": "Bun.randomUUIDv5(name: string | BufferSource, namespace: string | BufferSource | \"dns\" | \"url\" | \"oid\" | \"x500\", encoding?: \"hex\" | \"base64\" | \"base64url\"): string",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const id = Bun.randomUUIDv5(\"example.com\", \"dns\");\nconsole.log(id);"
+    },
+    {
+      "name": "Bun.CSRF",
+      "category": "hashing",
+      "kind": "namespace",
+      "summary": "Generates and verifies CSRF tokens signed with HMAC. Each token embeds a nonce, an issue timestamp and an expiry duration.",
+      "signature": "Bun.CSRF: { generate(secret?: string, options?: Bun.CSRFGenerateOptions): string; verify(token: string, options?: Bun.CSRFVerifyOptions): boolean }",
+      "docsUrl": "https://bun.com/docs/runtime/csrf",
+      "runtime": "any",
+      "example": "const token = Bun.CSRF.generate(\"my-secret\");\nconsole.log(Bun.CSRF.verify(token, { secret: \"my-secret\" }));"
+    },
+    {
+      "name": "Bun.gzipSync",
+      "category": "compression",
+      "kind": "function",
+      "summary": "Compresses data with the gzip format synchronously and returns a Uint8Array. Accepts optional zlib/libdeflate compression options.",
+      "signature": "Bun.gzipSync(data: Uint8Array | string | ArrayBuffer, options?: Bun.ZlibCompressionOptions | Bun.LibdeflateCompressionOptions): Uint8Array",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const gz = Bun.gzipSync(\"hello world\");\nconsole.log(gz.byteLength);\nconsole.log(new TextDecoder().decode(Bun.gunzipSync(gz)));"
+    },
+    {
+      "name": "Bun.gunzipSync",
+      "category": "compression",
+      "kind": "function",
+      "summary": "Decompresses gzip data synchronously and returns the original bytes as a Uint8Array.",
+      "signature": "Bun.gunzipSync(data: Uint8Array | string | ArrayBuffer, options?: Bun.ZlibCompressionOptions | Bun.LibdeflateCompressionOptions): Uint8Array",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const gz = Bun.gzipSync(\"hello world\");\nconsole.log(new TextDecoder().decode(Bun.gunzipSync(gz)));"
+    },
+    {
+      "name": "Bun.deflateSync",
+      "category": "compression",
+      "kind": "function",
+      "summary": "Compresses data with the raw zlib DEFLATE algorithm synchronously. Pair it with Bun.inflateSync to decompress.",
+      "signature": "Bun.deflateSync(data: Uint8Array | string | ArrayBuffer, options?: Bun.ZlibCompressionOptions | Bun.LibdeflateCompressionOptions): Uint8Array",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const compressed = Bun.deflateSync(\"hello world\");\nconsole.log(compressed.byteLength, new TextDecoder().decode(Bun.inflateSync(compressed)));"
+    },
+    {
+      "name": "Bun.inflateSync",
+      "category": "compression",
+      "kind": "function",
+      "summary": "Decompresses raw DEFLATE data synchronously back into the original bytes.",
+      "signature": "Bun.inflateSync(data: Uint8Array | string | ArrayBuffer, options?: Bun.ZlibCompressionOptions | Bun.LibdeflateCompressionOptions): Uint8Array",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const compressed = Bun.deflateSync(\"hello world\");\nconsole.log(new TextDecoder().decode(Bun.inflateSync(compressed)));"
+    },
+    {
+      "name": "Bun.zstdCompress",
+      "category": "compression",
+      "kind": "function",
+      "summary": "Compresses data with Zstandard asynchronously and resolves to a Buffer. An optional level tunes the compression ratio.",
+      "signature": "Bun.zstdCompress(data: NodeJS.TypedArray | Buffer | string | ArrayBuffer, options?: { level?: number }): Promise<Buffer>",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const compressed = await Bun.zstdCompress(\"hello world\");\nconsole.log((await Bun.zstdDecompress(compressed)).toString());"
+    },
+    {
+      "name": "Bun.zstdDecompress",
+      "category": "compression",
+      "kind": "function",
+      "summary": "Decompresses Zstandard data asynchronously and resolves to a Buffer.",
+      "signature": "Bun.zstdDecompress(data: NodeJS.TypedArray | Buffer | string | ArrayBuffer): Promise<Buffer>",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const compressed = await Bun.zstdCompress(\"hello\");\nconsole.log((await Bun.zstdDecompress(compressed)).toString());"
+    },
+    {
+      "name": "Bun.Archive",
+      "category": "compression",
+      "kind": "class",
+      "summary": "Creates and extracts tar archives, optionally gzip-compressed, from an object of file contents or existing archive bytes. files(), bytes() and blob() read an archive in memory while extract() writes it to a directory.",
+      "signature": "class Bun.Archive { constructor(data: Bun.ArchiveInput, options?: Bun.ArchiveOptions); extract(path: string, options?: Bun.ArchiveExtractOptions): Promise<number>; files(glob?: string | readonly string[]): Promise<Map<string, File>>; bytes(): Promise<Uint8Array>; blob(): Promise<Blob> }",
+      "docsUrl": "https://bun.com/docs/runtime/archive",
+      "runtime": "any",
+      "example": "const archive = new Bun.Archive({ \"hello.txt\": \"Hello, World!\" }, { compress: \"gzip\" });\nawait Bun.write(\"archive.tar.gz\", archive);\nconst files = await archive.files();\nconsole.log([...files.keys()]);"
+    },
+    {
+      "name": "Bun.inspect",
+      "category": "encoding",
+      "kind": "function",
+      "summary": "Formats any value as a readable string the way console.log does, including colors and depth options. Handy for logging and diagnostics.",
+      "signature": "Bun.inspect(value: unknown, options?: Bun.BunInspectOptions): string",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const formatted = Bun.inspect({ a: 1, b: [2, 3] }, { colors: false });\nconsole.log(formatted);"
+    },
+    {
+      "name": "Bun.deepEquals",
+      "category": "encoding",
+      "kind": "function",
+      "summary": "Compares two values deeply for equality. With strict set to true, object prototypes and types must also match.",
+      "signature": "Bun.deepEquals(a: unknown, b: unknown, strict?: boolean): boolean",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "console.log(Bun.deepEquals({ a: 1 }, { a: 1 }));\nconsole.log(Bun.deepEquals([1, 2], [2, 1]));"
+    },
+    {
+      "name": "Bun.escapeHTML",
+      "category": "encoding",
+      "kind": "function",
+      "summary": "Escapes the characters that are unsafe in HTML text and attributes: &, <, >, \", and '.",
+      "signature": "Bun.escapeHTML(input: string | object | number | boolean): string",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const safe = Bun.escapeHTML(\"<script>alert('x')</script>\");\nconsole.log(safe);"
+    },
+    {
+      "name": "Bun.stripANSI",
+      "category": "encoding",
+      "kind": "function",
+      "summary": "Removes ANSI escape sequences from a string, leaving only the visible text.",
+      "signature": "Bun.stripANSI(input: string): string",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const plain = Bun.stripANSI(\"\\u001b[31mred\\u001b[0m\");\nconsole.log(plain);"
+    },
+    {
+      "name": "Bun.stringWidth",
+      "category": "encoding",
+      "kind": "function",
+      "summary": "Counts how many terminal columns a string occupies, accounting for wide CJK characters and emoji. ANSI codes can be counted or ignored.",
+      "signature": "Bun.stringWidth(input: string, options?: Bun.StringWidthOptions): number",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "console.log(Bun.stringWidth(\"hello\"));\nconsole.log(Bun.stringWidth(\"你好\"));"
+    },
+    {
+      "name": "Bun.wrapAnsi",
+      "category": "encoding",
+      "kind": "function",
+      "summary": "Wraps text to a maximum column width while preserving ANSI escape sequences across line breaks.",
+      "signature": "Bun.wrapAnsi(input: string, columns: number, options?: Bun.WrapAnsiOptions): string",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const wrapped = Bun.wrapAnsi(\"The quick brown fox\", 10);\nconsole.log(wrapped);"
+    },
+    {
+      "name": "Bun.sliceAnsi",
+      "category": "encoding",
+      "kind": "function",
+      "summary": "Slices a string by visible column width, keeping ANSI escape sequences valid. Supports negative indexes and an ellipsis for truncation.",
+      "signature": "Bun.sliceAnsi(input: string, start?: number, end?: number, options?: string | boolean | Bun.SliceAnsiOptions): string",
+      "docsUrl": "https://bun.com/reference/globals/bun/sliceAnsi",
+      "runtime": "any",
+      "example": "console.log(Bun.sliceAnsi(\"hello world\", 0, 5));\nconsole.log(Bun.sliceAnsi(\"hello world\", -5));"
+    },
+    {
+      "name": "Bun.SQL",
+      "category": "storage",
+      "kind": "class",
+      "summary": "A SQL client for PostgreSQL, MySQL, MariaDB and SQLite that is also callable as a tagged template. It manages a connection pool and exposes close() and transaction helpers.",
+      "signature": "class Bun.SQL { constructor(connectionString: string | URL, options?: Bun.SQL.Options); <T = unknown>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>; close(): Promise<void> }",
+      "docsUrl": "https://bun.com/docs/runtime/sql",
+      "runtime": "any",
+      "example": "const sql = new Bun.SQL(\"sqlite://:memory:\");\nconst [row] = await sql`select 1 + 1 as two`;\nconsole.log(row.two);\nawait sql.close();"
+    },
+    {
+      "name": "bun:sqlite Database",
+      "category": "storage",
+      "kind": "class",
+      "summary": "The built-in SQLite3 database class from the bun:sqlite module. Supports prepared statements, transactions and synchronous queries.",
+      "signature": "new Database(filename?: string, options?: { readonly?: boolean; create?: boolean; readwrite?: boolean; safeIntegers?: boolean; strict?: boolean }): Database",
+      "docsUrl": "https://bun.com/docs/runtime/sqlite",
+      "runtime": "module",
+      "example": "import { Database } from \"bun:sqlite\";\nconst db = new Database(\":memory:\");\ndb.run(\"create table t (n int)\");\ndb.run(\"insert into t values (1), (2)\");\nconsole.log(db.query(\"select count(*) as n from t\").get());\ndb.close();"
+    },
+    {
+      "name": "Bun.RedisClient",
+      "category": "storage",
+      "kind": "class",
+      "summary": "A Redis (and Valkey) client with promise-based get/set/del, hashes, pub/sub and pipeline support. The URL defaults to VALKEY_URL, REDIS_URL or localhost.",
+      "signature": "new Bun.RedisClient(url?: string, options?: Bun.RedisOptions): Bun.RedisClient",
+      "docsUrl": "https://bun.com/docs/runtime/redis",
+      "runtime": "any",
+      "example": "const redis = new Bun.RedisClient(\"redis://localhost:6379\");\nawait redis.set(\"hello\", \"world\");\nconsole.log(await redis.get(\"hello\"));\nredis.close();"
+    },
+    {
+      "name": "Bun.S3Client",
+      "category": "storage",
+      "kind": "class",
+      "summary": "An S3-compatible bucket client. file() returns an S3File for reading and writing objects, and presign(), list(), delete(), size() and exists() cover the common operations.",
+      "signature": "new Bun.S3Client(options?: Bun.S3Options): Bun.S3Client",
+      "docsUrl": "https://bun.com/docs/runtime/s3",
+      "runtime": "any",
+      "example": "const bucket = new Bun.S3Client({ bucket: \"my-bucket\" });\nconst file = bucket.file(\"hello.txt\");\nawait file.write(\"Hello Bun!\");\nconsole.log(await file.text());"
+    },
+    {
+      "name": "Bun.TOML",
+      "category": "parsing",
+      "kind": "namespace",
+      "summary": "Parses TOML documents into objects and serializes objects back to TOML. Date/time values become Temporal objects.",
+      "signature": "Bun.TOML: { parse(input: string | NodeJS.TypedArray | Blob): object; stringify(input: unknown, replacer?: null, space?: string | number): string }",
+      "docsUrl": "https://bun.com/docs/runtime/toml",
+      "runtime": "any",
+      "example": "const config = Bun.TOML.parse(\"[server]\\nport = 3000\");\nconsole.log(config.server.port);\nconsole.log(Bun.TOML.stringify(config));"
+    },
+    {
+      "name": "Bun.YAML",
+      "category": "parsing",
+      "kind": "namespace",
+      "summary": "Parses YAML documents, including multi-document streams and anchors, and serializes JavaScript values back to YAML.",
+      "signature": "Bun.YAML: { parse(input: string | NodeJS.TypedArray | Blob): unknown; stringify(value: unknown, replacer?: null, space?: string | number): string }",
+      "docsUrl": "https://bun.com/docs/runtime/yaml",
+      "runtime": "any",
+      "example": "const data = Bun.YAML.parse(\"name: bun\\nversion: 1.4.4\");\nconsole.log(data.name);\nconsole.log(Bun.YAML.stringify(data));"
+    },
+    {
+      "name": "Bun.JSON5",
+      "category": "parsing",
+      "kind": "namespace",
+      "summary": "Parses and serializes JSON5, the JSON superset that allows comments, trailing commas, unquoted keys and single-quoted strings.",
+      "signature": "Bun.JSON5: { parse(input: string): unknown; stringify(value: unknown, replacer?: null, space?: string | number): string | undefined }",
+      "docsUrl": "https://bun.com/docs/runtime/json5",
+      "runtime": "any",
+      "example": "const value = Bun.JSON5.parse(\"{ name: 'bun', trailing: [1, 2,], }\");\nconsole.log(value.name, value.trailing.length);"
+    },
+    {
+      "name": "Bun.JSONL",
+      "category": "parsing",
+      "kind": "namespace",
+      "summary": "Parses JSON Lines, where every line is one JSON value. parseChunk() is designed for streaming input and reports how many bytes were consumed.",
+      "signature": "Bun.JSONL: { parse(input: string | NodeJS.TypedArray): unknown[]; parseChunk(input: string | NodeJS.TypedArray, start?: number, end?: number): { values: unknown[]; read: number; done: boolean; error: SyntaxError | null } }",
+      "docsUrl": "https://bun.com/docs/runtime/jsonl",
+      "runtime": "any",
+      "example": "const rows = Bun.JSONL.parse('{\"a\":1}\\n{\"a\":2}\\n');\nconsole.log(rows.length, rows[1].a);"
+    },
+    {
+      "name": "Bun.XML",
+      "category": "parsing",
+      "kind": "namespace",
+      "summary": "Parses XML into a compact object shape (attributes as @name keys, text as #text) and serializes values back to XML.",
+      "signature": "Bun.XML: { parse(input: string | NodeJS.TypedArray | Blob, options?: Bun.XML.ParseOptions): Bun.XML.Document | Bun.XML.Node; stringify(value: unknown, replacer?: null, space?: string | number): string | undefined }",
+      "docsUrl": "https://bun.com/docs/runtime/xml",
+      "runtime": "any",
+      "example": "const doc = Bun.XML.parse(\"<root><item>hello</item></root>\");\nconsole.log(doc.root.item);"
+    },
+    {
+      "name": "Bun.markdown",
+      "category": "parsing",
+      "kind": "namespace",
+      "summary": "Renders Markdown with GitHub-flavored extensions to HTML, to ANSI terminal output, or through custom render callbacks; a React helper is also available.",
+      "signature": "Bun.markdown: { html(input: string, options?: Bun.markdown.Options): string; ansi(input: string, theme?: Bun.markdown.AnsiTheme): string; render(input: string, callbacks?: Bun.markdown.RenderCallbacks, options?: Bun.markdown.Options): string; react(input: string, components?: unknown): unknown }",
+      "docsUrl": "https://bun.com/docs/runtime/markdown",
+      "runtime": "any",
+      "example": "const html = Bun.markdown.html(\"# Hello **world**\");\nconsole.log(html.trim());"
+    },
+    {
+      "name": "Bun.build",
+      "category": "tooling",
+      "kind": "function",
+      "summary": "Bundles JavaScript, TypeScript, JSX, CSS and HTML entrypoints into optimized outputs using Bun's native bundler. Resolves to a BuildOutput with success, outputs and logs.",
+      "signature": "Bun.build(config: Bun.BuildConfig): Promise<Bun.BuildOutput>",
+      "docsUrl": "https://bun.com/docs/bundler",
+      "runtime": "any",
+      "example": "const result = await Bun.build({\n  entrypoints: [\"./index.ts\"],\n  outdir: \"./dist\",\n});\nconsole.log(result.success, result.outputs.length);"
+    },
+    {
+      "name": "Bun.Transpiler",
+      "category": "tooling",
+      "kind": "class",
+      "summary": "Transpiles TypeScript, JSX and modern JavaScript to current JavaScript in memory without bundling or resolving imports.",
+      "signature": "class Bun.Transpiler { constructor(options?: Bun.TranspilerOptions); transformSync(code: Bun.StringOrBuffer, loader?: Bun.Loader): string; transform(code: Bun.StringOrBuffer, loader?: Bun.Loader): Promise<string> }",
+      "docsUrl": "https://bun.com/docs/runtime/transpiler",
+      "runtime": "any",
+      "example": "const transpiler = new Bun.Transpiler({ loader: \"tsx\" });\nconsole.log(transpiler.transformSync(\"const App = () => <div>hi</div>;\"));"
+    },
+    {
+      "name": "Bun.plugin",
+      "category": "tooling",
+      "kind": "function",
+      "summary": "Registers a plugin that can intercept module resolution and loading at runtime, used to import and transform custom file types.",
+      "signature": "Bun.plugin(plugin: Bun.BunPlugin): void",
+      "docsUrl": "https://bun.com/docs/runtime/plugins",
+      "runtime": "any",
+      "example": "Bun.plugin({\n  name: \"txt-loader\",\n  setup(build) {\n    const onLoad = async (args) => ({ contents: await Bun.file(args.path).text(), loader: \"text\" });\n    build.onLoad({ filter: /\\.txt$/ }, onLoad);\n  },\n});"
+    },
+    {
+      "name": "Bun.resolve",
+      "category": "tooling",
+      "kind": "function",
+      "summary": "Resolves a module specifier as if it were imported from a parent path, using Bun's module resolution. The synchronous twin is Bun.resolveSync().",
+      "signature": "Bun.resolve(moduleId: string, parent: string): Promise<string>",
+      "docsUrl": "https://bun.com/docs/runtime/utils",
+      "runtime": "any",
+      "example": "const path = await Bun.resolve(\"./package.json\", process.cwd());\nconsole.log(path);"
+    },
+    {
+      "name": "Bun.FFI",
+      "category": "tooling",
+      "kind": "namespace",
+      "summary": "Foreign-function interface for calling native libraries from JavaScript. dlopen() loads a shared library, maps its symbols and returns typed call wrappers.",
+      "signature": "Bun.FFI: { dlopen(path: string, symbols: Record<string, Bun.FFIFunction>): { symbols: Bun.FFIFunctionCallable; close(): void }; callback(fn: Function, definition: Bun.FFIFunction): unknown; linkSymbols(symbols: Record<string, Bun.FFIFunction>): { symbols: Bun.FFIFunctionCallable }; CString(value: string): unknown; ptr(value: unknown): unknown }",
+      "docsUrl": "https://bun.com/docs/runtime/ffi",
+      "runtime": "module",
+      "example": "import { FFIType } from \"bun:ffi\";\nconst { symbols } = Bun.FFI.dlopen(\"libc.so.6\", {\n  strlen: { args: [FFIType.cstring], returns: FFIType.u64 },\n});\nconsole.log(symbols.strlen(\"hello\"));"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "greeting": "workspace:*" },
+  "scripts": {
+    "start": "bun src/index.ts",
+    "test": "bun test"
+  }
+}

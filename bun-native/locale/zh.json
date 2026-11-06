@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Bun 原生",
+    "description": "识别 Bun 原生项目，离线解答 Bun 全局 API 用法，并在会话沙箱内运行 Bun 任务、测试与安装。"
+  }
+}

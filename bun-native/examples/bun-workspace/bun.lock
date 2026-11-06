@@ -1,0 +1,25 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "bun-workspace-demo",
+    },
+    "apps/web": {
+      "name": "web",
+      "version": "0.1.0",
+      "dependencies": {
+        "greeting": "workspace:*",
+      },
+    },
+    "packages/greeting": {
+      "name": "greeting",
+      "version": "0.2.0",
+    },
+  },
+  "packages": {
+    "greeting": ["greeting@workspace:packages/greeting"],
+
+    "web": ["web@workspace:apps/web"],
+  }
+}

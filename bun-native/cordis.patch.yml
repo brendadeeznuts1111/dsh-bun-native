@@ -1,0 +1,11 @@
+# Bun native — Host tools for Bun-native projects.
+# Adjust these values (or delete a key to take the plugin's default) in this
+# profile's own patch layer; edits here are replaced when the bundle is updated.
+- insert:
+    - id: bun-native
+      name: '@local/bun-native'
+      config:
+        bunPath: bun
+        timeoutMs: 60000
+        maxOutputChars: 20000
+        promptGuidance: true
