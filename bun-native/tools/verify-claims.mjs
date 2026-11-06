@@ -125,8 +125,13 @@ try {
     serveEntry !== undefined && serveEntry.category === 'networking' && serveEntry.example.includes('server.url'),
   )
 
+  // Four property domains, each check labelled by its domain so a failure
+  // names the property that drifted (URL / protocol / hostname / port).
   const serveCheck = (claim, expectation, passed, detail) => {
     check(claim, expectation, { cmd: '(in-process Bun.serve)', exit: passed ? 0 : 1, stdout: detail, stderr: '' }, passed)
+  }
+  const propertyCheck = (domain, claim, expectation, passed, detail) => {
+    check(`${domain} property — ${claim}`, expectation, { cmd: '(in-process Bun.serve)', exit: passed ? 0 : 1, stdout: detail, stderr: '' }, passed)
   }
 
   let server
@@ -140,17 +145,28 @@ try {
       },
     })
     const url = server.url
-    serveCheck('Bun.serve returns a URL at server.url', 'server.url instanceof URL', url instanceof URL, String(url))
-    serveCheck('server.url.protocol is http: without TLS', 'url.protocol === "http:"', url.protocol === 'http:', url.protocol)
-    serveCheck('server.port matches the URL port', 'Number(url.port) === server.port', Number(url.port) === server.port, `port=${server.port} url.port=${url.port}`)
-    serveCheck('the URL has a hostname', 'url.hostname is non-empty', url.hostname.length > 0, `hostname=${url.hostname} hostname=${server.hostname}`)
-    const hasProtocolProperty = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(server), 'protocol') !== undefined || 'protocol' in server
-    serveCheck(
-      'Server.protocol is recorded, not assumed',
-      'the property test records whether Server.protocol exists; protocol is authoritative on server.url',
-      true,
-      hasProtocolProperty ? `Server.protocol=${String(server.protocol)}` : 'Server.protocol is undefined; use server.url.protocol',
-    )
+
+    propertyCheck('URL', 'server.url is a URL instance', 'url instanceof URL', url instanceof URL, String(url))
+    propertyCheck('URL', 'href is an http root URL', 'href matches http://host:port/', /^http:\/\/[^/]+:\d+\/$/u.test(url.href), url.href)
+    propertyCheck('URL', 'toString() equals href', 'url.toString() === url.href', url.toString() === url.href, url.toString())
+    propertyCheck('URL', 'origin is protocol + host, without a path', 'origin equals `http://${url.host}`', url.origin === `http://${url.host}` && !url.origin.endsWith('/'), url.origin)
+    propertyCheck('URL', 'pathname is / and search is empty', 'pathname "/" and empty search', url.pathname === '/' && url.search === '', `${url.pathname}${url.search}`)
+    propertyCheck('URL', 'host is hostname:port', 'url.host === `${url.hostname}:${url.port}`', url.host === `${url.hostname}:${url.port}`, url.host)
+
+    propertyCheck('protocol', 'server.protocol is the bare scheme', 'server.protocol === "http"', server.protocol === 'http', String(server.protocol))
+    propertyCheck('protocol', 'server.url.protocol is the scheme with a colon', 'url.protocol === "http:"', url.protocol === 'http:', url.protocol)
+    propertyCheck('protocol', 'the two properties differ only by the colon', '`${server.protocol}:` === url.protocol', `${server.protocol}:` === url.protocol, `${server.protocol} vs ${url.protocol}`)
+    propertyCheck('protocol', 'Server.protocol exists on the handle', 'the property is present and recorded, not assumed', 'protocol' in server, String(server.protocol))
+
+    propertyCheck('hostname', 'server.hostname defaults to localhost', 'hostname === "localhost"', server.hostname === 'localhost', server.hostname)
+    propertyCheck('hostname', 'server.hostname equals url.hostname', 'both report the same host', server.hostname === url.hostname, `${server.hostname} vs ${url.hostname}`)
+    propertyCheck('hostname', 'the hostname appears in the URL origin', 'origin contains hostname', url.origin.includes(server.hostname), url.origin)
+
+    propertyCheck('port', 'server.port is an allocated integer in 1..65535', 'integer between 1 and 65535', Number.isInteger(server.port) && server.port > 0 && server.port <= 65_535, String(server.port))
+    propertyCheck('port', 'url.port is the decimal string of server.port', 'url.port === String(server.port)', url.port === String(server.port), `${url.port} vs ${server.port}`)
+    propertyCheck('port', 'the URL origin ends with :server.port', 'origin.endsWith(`:${server.port}`)', url.origin.endsWith(`:${server.port}`), url.origin)
+
+    // Server behaviour checks stay separate from the four property domains.
     const jsonResponse = await fetch(new URL('/json', url))
     const jsonBody = await jsonResponse.json()
     serveCheck('the fetch handler answers at server.url', 'HTTP 200 with {ok:true}', jsonResponse.status === 200 && jsonBody.ok === true, `status=${jsonResponse.status} body=${JSON.stringify(jsonBody)}`)
@@ -170,6 +186,30 @@ try {
     } catch {
       // Already stopped.
     }
+  }
+
+  // Explicit hostname binding is its own hostname property check.
+  let namedServer
+  try {
+    namedServer = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('ok') })
+    propertyCheck(
+      'hostname',
+      'an explicit 127.0.0.1 bind is reflected in server.hostname and url.hostname',
+      'both report 127.0.0.1',
+      namedServer.hostname === '127.0.0.1' && namedServer.url.hostname === '127.0.0.1',
+      `${namedServer.hostname} / ${namedServer.url.hostname}`,
+    )
+  } finally {
+    namedServer?.stop()
+  }
+
+  // Port validation is a port property, not a server-behaviour check.
+  try {
+    const invalid = Bun.serve({ port: 70_000, fetch: () => new Response('x') })
+    invalid.stop()
+    propertyCheck('port', 'a port above 65535 is rejected', 'Bun.serve throws a range error', false, 'a server was created')
+  } catch (error) {
+    propertyCheck('port', 'a port above 65535 is rejected', 'Bun.serve throws a range error', /out of range|65535/u.test(error.message), error.message)
   }
 
   const exampleRun = run(['-e', serveEntry.example])

@@ -78,10 +78,10 @@ project under the session's workspace.
 ## Tests
 
 ```sh
-bun run test         # bun test ./test — 21 tests
+bun run test         # bun test ./test — 40 tests in two files
 bun run smoke        # tools/smoke.mjs — stub-context harness for apply() and all tools
 bun run catalog      # tools/validate-catalog.mjs — catalog against the running Bun
-bun run verify:claims # tools/verify-claims.mjs — re-settle the README's Bun CLI claims
+bun run verify:claims # tools/verify-claims.mjs — re-settle the README's Bun CLI claims + Bun.serve properties
 ```
 
 `test/plugin.test.ts` covers configuration parsing, the `workspace:`/`bunfig`/
@@ -94,16 +94,25 @@ native properties, failing `bun:test`), the dashboard snapshot's project
 discovery, the catalog-version drift warning, and registration of the four tools
 + prompt section + status route.
 
+`test/serve-properties.test.ts` keeps the four `Bun.serve` property domains in
+**separate suites**, so a failure names the domain it belongs to:
+
+| Suite | Properties asserted |
+|---|---|
+| `URL properties` | `server.url` is a `URL`; `href` is `http://host:port/`; `toString()` equals `href`; `origin` is protocol+host without a path; `pathname` is `/` and `search` empty; `host` is `hostname:port` |
+| `protocol properties` | `server.protocol === "http"` (bare, no colon); `server.url.protocol === "http:"` (WHATWG, colon); the two differ only by the colon; `Server.protocol` exists |
+| `hostname properties` | defaults to `localhost`; equals `url.hostname`; explicit `127.0.0.1` bind reflected in both; hostname appears in `url.origin` |
+| `port properties` | `server.port` is an allocated integer 1–65535; `url.port` is its decimal string; origin ends with `:port`; port 70000 is rejected; two ephemeral servers get distinct ports |
+
 `tools/verify-claims.mjs` runs the disputed Bun CLI forms against the installed
 Bun in a throwaway workspace copy and fails when the prose no longer matches:
 `--filter` forms and their exact errors, `bun add --cwd`, the `bun pm hash`
-family, and `bun pm bin`. It also runs **Bun.serve property tests** in-process
-and against the digest's own example: `server.url` is a `URL` with
-`protocol === "http:"` without TLS, `server.port`/`hostname` agree with it,
-`server.protocol` exists and is `"http"` (no colon — the URL carries the colon),
-a `/json` handler round-trips, a plain handler returns its text, `server.stop()`
-closes the listener, and the `Bun.serve` example in `data/bun-globals.json`
-executes as written. Its output is also the source for the claims section below.
+family, and `bun pm bin`. It repeats the same **four property domains as
+separate labelled checks** (`URL property — …`, `protocol property — …`,
+`hostname property — …`, `port property — …`), plus the server-behaviour checks
+(handler round-trips, `stop()` closes the listener) and the `Bun.serve` example
+from `data/bun-globals.json` executing as written. Its output is also the source
+for the claims section below.
 
 `tools/validate-catalog.mjs --json <path>` writes a machine-readable catalog
 report (`curated`, `uncovered`, `missingOnRuntime`, per-category counts,
