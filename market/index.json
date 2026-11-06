@@ -1,0 +1,99 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Bun-native DSH plugins",
+    "zh": "Bun 原生 DSH 插件"
+  },
+  "description": {
+    "en": "Format-1 plugin market index for the Bun-native DSH bundle.",
+    "zh": "Bun 原生 DSH 组合包的 format-1 插件市场索引。"
+  },
+  "metadata": {
+    "categories": {
+      "developer-tools": {
+        "title": {
+          "en": "Developer tools",
+          "zh": "开发者工具"
+        }
+      }
+    },
+    "labels": {
+      "bun": {
+        "title": {
+          "en": "Bun",
+          "zh": "Bun"
+        }
+      },
+      "offline": {
+        "title": {
+          "en": "Offline",
+          "zh": "离线"
+        }
+      }
+    },
+    "sortKeys": {
+      "published": {
+        "title": {
+          "en": "Published",
+          "zh": "发布时间"
+        },
+        "order": "desc"
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "@local/bun-native",
+      "title": {
+        "en": "Bun native",
+        "zh": "Bun 原生"
+      },
+      "description": {
+        "en": "Detects Bun-native projects, answers Bun global API questions offline, and runs Bun tasks, tests and installs inside the session sandbox.",
+        "zh": "识别 Bun 原生项目，离线解答 Bun 全局 API 用法，并在会话沙箱内运行 Bun 任务、测试与安装。"
+      },
+      "icon": "icons/bun-native.svg",
+      "author": "brendadeeznuts1111",
+      "homepage": "https://github.com/brendadeeznuts1111/dsh-bun-native#readme",
+      "repository": {
+        "url": "https://github.com/brendadeeznuts1111/dsh-bun-native",
+        "directory": "bun-native"
+      },
+      "metadata": {
+        "category": "developer-tools",
+        "labels": [
+          "bun",
+          "offline"
+        ],
+        "keywords": [
+          "bun",
+          "bun-native",
+          "workspace",
+          "monorepo",
+          "dsh-plugin"
+        ],
+        "sortKeys": {
+          "published": 1794004782
+        }
+      },
+      "dist-tags": {
+        "latest": "1.0.0"
+      },
+      "versions": [
+        {
+          "version": "1.0.0",
+          "publishTimestamp": 1794004782,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/brendadeeznuts1111/dsh-bun-native",
+            "commit": "c1b67c0132bd4cd5ef7ef5b90bea82c70cf32f4f",
+            "path": "bun-native"
+          },
+          "engines": {
+            "dsh": ">=0.2.2-rc.1"
+          }
+        }
+      ]
+    }
+  ]
+}

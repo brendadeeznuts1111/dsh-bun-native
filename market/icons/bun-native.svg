@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Bun native">
+  <rect width="512" height="512" rx="112" fill="#2B2118"/>
+  <ellipse cx="256" cy="358" rx="146" ry="26" fill="#120C07" opacity="0.55"/>
+  <path d="M256 124c-86 0-152 64-152 142 0 35 11 64 30 86 20 25 60 42 122 42s102-17 122-42c19-22 30-51 30-86 0-78-66-142-152-142z" fill="#F7EAD5"/>
+  <path d="M256 124c-33 0-62 21-79 51 21-16 49-26 79-26s58 10 79 26c-17-30-46-51-79-51z" fill="#E8B25C"/>
+  <g stroke="#D9B98C" stroke-width="10" stroke-linecap="round" fill="none">
+    <path d="M256 192v154"/>
+    <path d="M205 201c-15 45-15 99 8 145"/>
+    <path d="M307 201c15 45 15 99-8 145"/>
+    <path d="M164 232c-4 45 8 87 31 114"/>
+    <path d="M348 232c4 45-8 87-31 114"/>
+  </g>
+  <circle cx="256" cy="152" r="17" fill="#E8B25C"/>
+  <circle cx="256" cy="152" r="7" fill="#2B2118"/>
+</svg>
