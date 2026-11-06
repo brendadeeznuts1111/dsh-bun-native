@@ -621,7 +621,7 @@
       "name": "Bun.YAML",
       "category": "parsing",
       "kind": "namespace",
-      "summary": "Parses YAML documents, including multi-document streams and anchors, and serializes JavaScript values back to YAML.",
+      "summary": "Parses YAML documents, including multi-document streams, anchors, aliases and cyclic anchors, and serializes JavaScript values back to YAML; cyclic values stringify as anchors and aliases.",
       "signature": "Bun.YAML: { parse(input: string | NodeJS.TypedArray | Blob): unknown; stringify(value: unknown, replacer?: null, space?: string | number): string }",
       "docsUrl": "https://bun.com/docs/runtime/yaml",
       "runtime": "any",

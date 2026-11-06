@@ -99,7 +99,7 @@ project under the session's workspace.
 ## Tests
 
 ```sh
-bun run test         # bun test ./test — 142 tests in four files
+bun run test         # bun test ./test — 155 tests in five files
 bun run smoke        # tools/smoke.mjs — stub-context harness for apply() and all tools
 bun run catalog      # tools/validate-catalog.mjs — catalog against the running Bun
 bun run verify:claims # tools/verify-claims.mjs — re-settle the README's Bun CLI/serve/node:url claims
@@ -163,6 +163,23 @@ budgets:
 | `Bun.indexOfLine non-ASCII scan` | newline after a multi-byte character found at the correct byte offset; ASCII case |
 | `expect matcher semantics` | `toContain` uses `===`: `[-0]` contains `0`, `[NaN]` does not contain `NaN`, identity still works |
 | `Response.json default formatting` | compact JSON output with no indent argument |
+
+`test/yaml-cyclic-anchors.test.ts` covers the Bun 1.4 announcement card
+(`yaml-cyclic-anchors.jpg`): **`Bun.YAML.parse` supports cyclic anchors &
+aliases**. The tweet example from the card resolves its `quote_tweet: *tweet`
+alias to the same object, so `tweet.quote_tweet === tweet` and the chained
+`tweet.quote_tweet.quote_tweet.quote_tweet.text` returns the block scalar.
+Suites stay separate:
+
+| Suite | Asserted |
+|---|---|
+| `Bun.YAML cyclic map anchors` | self-aliased tweet identity; chained traversal; exactly the two keys |
+| `Bun.YAML anchor and alias identity` | aliased mappings/sequences are the same object; scalar aliases carry the value |
+| `Bun.YAML merge keys` | `<<: *base` copies properties without sharing identity |
+| `Bun.YAML cyclic arrays` | an anchored sequence including its own alias is self-referential |
+| `Bun.YAML stringify cycles` | a cycle serializes as `&root`/`*root`; `parse(stringify(cycle))` restores the self reference for objects and arrays |
+| `Bun.YAML stringify plain values` | plain values round-trip |
+| `catalog documents cyclic anchors` | the `Bun.YAML` digest summary names cyclic anchors |
 
 `research/bun-1.4.4-release-notes.md` is the traceability table: every verified
 claim, every performance item deliberately left to Bun's own benchmarks, and the
