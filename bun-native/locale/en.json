@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Bun native",
-    "description": "Detects Bun-native projects, answers Bun global API questions offline, runs Bun tasks, tests and installs in the session sandbox, and diagnoses project health with bun_doctor."
+    "description": "Detects Bun-native projects, answers Bun global API questions offline, runs Bun tasks, tests and installs in the session sandbox, diagnoses project health with bun_doctor, and forwards bun lint when the build supports it."
   }
 }

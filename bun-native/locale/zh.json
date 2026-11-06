@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Bun 原生",
-    "description": "识别 Bun 原生项目，离线解答 Bun 全局 API 用法，在会话沙箱内运行 Bun 任务、测试与安装，并用 bun_doctor 诊断项目健康。"
+    "description": "识别 Bun 原生项目，离线解答 Bun 全局 API 用法，在会话沙箱内运行 Bun 任务、测试与安装，用 bun_doctor 诊断项目健康，并在 Bun 支持时转发 bun lint。"
   }
 }

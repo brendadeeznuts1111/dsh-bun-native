@@ -11,7 +11,7 @@ system-prompt section:
 |---|---|---|
 | `bun_project` | read-only | Classifies a directory (`bun-native` / `bun-capable` / `none`) with a `confidence` and an ordered `signals` list, and reports its lockfile (`bun.lock` text or legacy `bun.lockb`, plus any foreign lockfiles), `bunfig.toml` sections, `package.json` scripts and dependency counts, workspaces, TypeScript setup, `node_modules`/isolated-store state, and the installed Bun version. |
 | `bun_api` | read-only | Answers from a bundled offline digest of the Bun globals (`Bun.serve`, `Bun.file`, `Bun.$`, `bun:sqlite`, `Bun.spawn`, hashing, compression, parsers, …) with signatures, examples and doc links — no network round-trip. |
-| `bun_exec` | runs a process | Runs `bun run <script|file>`, `bun test`, `bun install` (with optional `filter`), `bun add`, `bun ci`, `bun pm <utility>` or `bun --eval <code>` inside the session's sandbox policy, capped by a timeout, reporting stdout/stderr and the exit status. |
+| `bun_exec` | runs a process | Runs `bun run <script|file>`, `bun test`, `bun install` (with optional `filter`), `bun add`, `bun ci`, `bun lint`, `bun pm <utility>` or `bun --eval <code>` inside the session's sandbox policy, capped by a timeout, reporting stdout/stderr and the exit status. |
 | `bun_doctor` | read-only | Runs a health report: a probe inside the project's Bun (version, platform, native APIs), project checks (classification, lockfile, workspace, linker, package manifest), catalog agreement (curated names resolve on this runtime plus coverage), and optionally the project's `bun:test` suite. |
 
 The dashboard endpoint (`/api/bun-native/status`, owner-only) returns a cheap
@@ -38,6 +38,20 @@ server at <https://bun.com/docs/mcp> and adds four read-only tools:
 live source for guides, blog posts and full pages. `bun_api`'s no-match output
 and the prompt section point at the MCP tools when they are present. Install
 both cards from the market index, or install `bun-docs-mcp/` directly.
+
+## Linting
+
+`bun_exec` mode `lint` forwards to `bun lint` — useful for `--explain <rule>`,
+`--rules`, `--fix`, `--type-aware`, `--staged` and `--changed`:
+
+```json
+{ "mode": "lint", "args": ["--explain", "prefer-const"] }
+```
+
+Bun 1.4.4 does not ship the built-in linter yet: `bun lint` resolves to a
+package script and reports `error: Script not found "lint"`. Bun's docs describe
+the linter and its 1,000+ rules, so the mode surfaces Bun's own error until the
+runtime supports it; the mode exists now so a future Bun needs no plugin change.
 
 ## Configuration
 

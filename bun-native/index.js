@@ -54,7 +54,7 @@ const FOREIGN_LOCKFILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '
 /** Nested marker for the isolated workspace linker. */
 const ISOLATED_STORE = 'node_modules/.bun'
 
-const EXEC_MODES = ['run', 'test', 'install', 'add', 'ci', 'eval', 'pm']
+const EXEC_MODES = ['run', 'test', 'install', 'add', 'ci', 'lint', 'eval', 'pm']
 
 /**
  * Validate the row config against the documented options.
@@ -1198,6 +1198,13 @@ async function pickDashboardDirectory(ctx, directory, signal) {
         // An unreadable marker path is not a marker.
       }
     }
+    try {
+      const packageJson = await readPackageJsonAt(fs, dir, signal)
+      const scripts = packageJson?.raw?.scripts
+      if (scripts !== null && typeof scripts === 'object' && /(?:^|[\s&|;(])bun(?:x)?(?:\s|$)/.test(Object.values(scripts).map(String).join('\n'))) return true
+    } catch {
+      // Not a readable package.json.
+    }
     return false
   }
   if (await hasMarker(directory)) return directory
@@ -1639,17 +1646,17 @@ export function apply(ctx, rawConfig) {
 
   const execTool = {
     name: 'bun_exec',
-    description: 'Run Bun in the session workspace under the active sandbox policy: `run` executes a package.json script or a file, `test` runs `bun test`, `install` runs `bun install`, `add` installs a package spec, `ci` runs `bun ci` (frozen-lockfile install for CI), `pm` runs a `bun pm` package-manager utility, and `eval` runs inline code with `bun --eval`. `filter` targets workspace members using Bun\'s real syntax (`bun --filter <pattern> <script>`, `bun install --filter <pattern>`); for `add` use `cwd`, because Bun has no filter flag for it. Non-zero exits are reported in the result, not as a failed call. Prefer `bun_project` first to learn the project\'s scripts, lockfile, workspace root and linker.',
+    description: 'Run Bun in the session workspace under the active sandbox policy: `run` executes a package.json script or a file, `test` runs `bun test`, `install` runs `bun install`, `add` installs a package spec, `ci` runs `bun ci` (frozen-lockfile install for CI), `lint` runs `bun lint` (use `args` for `--explain <rule>`, `--rules`, `--fix`, `--type-aware`, etc.; the built-in linter is version-gated), `pm` runs a `bun pm` package-manager utility, and `eval` runs inline code with `bun --eval`. `filter` targets workspace members using Bun\'s real syntax (`bun --filter <pattern> <script>`, `bun install --filter <pattern>`); for `add` use `cwd`, because Bun has no filter flag for it. Non-zero exits are reported in the result, not as a failed call. Prefer `bun_project` first to learn the project\'s scripts, lockfile, workspace root and linker.',
     parameters: {
       mode: {
         type: 'string',
         enum: EXEC_MODES,
         required: true,
-        description: 'What to run: "run" a script or file, "test" the bun:test suite, "install" dependencies, "add" a package, "ci" a frozen-lockfile install, "pm" a package-manager utility, or "eval" inline code.',
+        description: 'What to run: "run" a script or file, "test" the bun:test suite, "install" dependencies, "add" a package, "ci" a frozen-lockfile install, "lint" the built-in linter when available, "pm" a package-manager utility, or "eval" inline code.',
       },
       target: {
         type: 'string',
-        description: 'For "run": script name or file path. For "test": optional test file or filter. For "add": the package spec, such as "zod@^3". For "install" and "pm": unused.',
+        description: 'For "run": script name or file path. For "test": optional test file or filter. For "add": the package spec, such as "zod@^3". For "lint": optional file, directory or glob. For "install" and "pm": unused.',
       },
       code: {
         type: 'string',
@@ -1662,7 +1669,7 @@ export function apply(ctx, rawConfig) {
       args: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Extra arguments appended after the mode\'s own arguments. For "pm", the utility and its flags, such as ["ls", "--all"].',
+        description: 'Extra arguments appended after the mode\'s own arguments. For "pm", the utility and its flags, such as ["ls", "--all"]; for "lint", flags such as ["--explain", "prefer-const"] or ["--fix"].',
       },
       cwd: {
         type: 'string',
@@ -1751,6 +1758,8 @@ export function apply(ctx, rawConfig) {
         runArgs.push('add', target, ...extra)
       } else if (mode === 'ci') {
         runArgs.push('ci', ...extra)
+      } else if (mode === 'lint') {
+        runArgs.push('lint', ...(target === undefined ? [] : [target]), ...extra)
       } else if (mode === 'pm') {
         if (extra.length === 0) throw new Error('bun_exec mode "pm" requires `args` naming a bun pm command, for example ["ls", "--all"]')
         runArgs.push('pm', ...extra)
@@ -1768,7 +1777,7 @@ export function apply(ctx, rawConfig) {
       const target = typeof args === 'object' && args !== null && typeof args.target === 'string' ? args.target : undefined
       const code = typeof args === 'object' && args !== null && typeof args.code === 'string' ? args.code : undefined
       const pmArgs = typeof args === 'object' && args !== null && Array.isArray(args.args) ? args.args.join(' ') : ''
-      const subject = mode === 'eval' ? (code ?? '').split('\n')[0].slice(0, 80) : mode === 'pm' ? pmArgs : target
+      const subject = mode === 'eval' ? (code ?? '').split('\n')[0].slice(0, 80) : mode === 'pm' ? pmArgs : mode === 'lint' ? [target, pmArgs].filter((part) => part !== undefined && part.length > 0).join(' ') : target
       return {
         card: 'terminal',
         title: `bun ${mode}${subject !== undefined && subject.length > 0 ? ` ${subject}` : ''}`,

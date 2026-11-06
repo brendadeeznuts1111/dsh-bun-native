@@ -192,6 +192,16 @@ assert.deepEqual(subprocess.calls.at(-1).argv, ['bun', '--eval', 'console.log(Bu
 assert.equal(evaluated.stdout.text.trim(), '1.4.4')
 report('bun_exec eval argv', true, subprocess.calls.at(-1).argv.join(' '))
 
+// --- bun_exec lint ---------------------------------------------------------
+subprocess.enqueue({ stdout: '', stderr: '', exitCode: 0 })
+const lint = await tools.get('bun_exec').execute({ mode: 'lint', args: ['--explain', 'prefer-const'] }, exec)
+assert.deepEqual(subprocess.calls.at(-1).argv, ['bun', 'lint', '--explain', 'prefer-const'])
+assert.equal(lint.exitCode, 0)
+subprocess.enqueue({ stdout: '', stderr: '', exitCode: 0 })
+await tools.get('bun_exec').execute({ mode: 'lint', target: 'src', args: ['--fix'] }, exec)
+assert.deepEqual(subprocess.calls.at(-1).argv, ['bun', 'lint', 'src', '--fix'])
+report('bun_exec lint argv', true, 'bun lint --explain prefer-const; bun lint src --fix')
+
 // --- bun_exec failure and timeout -----------------------------------------
 subprocess.enqueue({ stdout: '', stderr: 'error: Script not found "nope"\n', exitCode: 1 })
 const failed = await tools.get('bun_exec').execute({ mode: 'run', target: 'nope' }, exec)

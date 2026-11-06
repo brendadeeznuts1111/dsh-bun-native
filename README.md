@@ -23,9 +23,17 @@ market/       the format-1 plugin market index + its build/validate tooling
 | `bun_doctor` | read-only | Runtime probe, project health, catalog agreement and optionally the project's `bun:test` suite; returns a pass/warn/fail report instead of throwing. |
 
 It also exposes a read-only dashboard endpoint (`/api/bun-native/status`,
-owner-only) with the cheap doctor snapshot, and contributes a short
-system-prompt section that tells the agent to read the project before assuming
-a toolchain and to prefer built-in Bun APIs over new dependencies.
+owner-only) with the cheap doctor snapshot, contributes a short system-prompt
+section that tells the agent to read the project before assuming a toolchain and
+to prefer built-in Bun APIs over new dependencies, and ships a browser half that
+renders the dashboard as a **Bun native** page in Settings (project, runtime
+properties, catalog coverage and doctor checks, with a refresh button; English
+and Chinese, theme tokens only).
+
+`bun_doctor` is also the automation primitive: a scheduled task can ask the agent
+to run it (optionally with `runTests: true`) and report new failures or warnings;
+`bun_exec` covers the matching steps (`ci`, `lint`, `test`, `build`, filtered
+installs).
 
 ### `@local/bun-docs-mcp`
 
@@ -88,6 +96,8 @@ pinning, and the two-phase release procedure.
 - `bun-native/examples/bun-demo` — a dependency-free Bun project with a `bunfig.toml`, `bun:test` suite and a `Bun.serve` entry point.
 - `bun-native/examples/bun-workspace` — a multi-glob Bun workspace (`packages/*`, `apps/*`, `workspace:*` dependencies, one committed `bun.lock`).
 - `bun-native/tools/smoke.mjs` — exercises `apply()`, all four tools, the prompt section (including the Bun docs MCP pointer) and the doctor report against a stub Cordis context.
+- `bun-native/test/plugin.test.ts` — `bun test ./test`: 16 Bun-native property and behaviour tests (catalog names exist on the runtime, examples transpile, workspace classification, doctor pass/fail reports, dashboard discovery, registration of tools/prompt/route).
+- `bun-native/tools/validate-catalog.mjs` — checks every catalog entry against the running Bun and reports the globals not curated yet.
 - `bun-docs-mcp` — a live `initialize` + `search_bun` call against <https://bun.com/docs/mcp> returns bun.com results; the server advertises the four tools and `bun://skill`.
 
 ## Licence
